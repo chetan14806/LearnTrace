@@ -42,20 +42,22 @@ async function request(baseUrl, path, method = "GET", body) {
     const sources = await request(baseUrl, "/api/sources");
     assert.equal(sources.sources.length, 2, "Two ingested sources should appear in the real source library.");
 
-    const map = await request(baseUrl, "/api/concept-map");
+    const sourceIds = sources.sources.map(source => source.id);
+    const sourceQuery = new URLSearchParams(); sourceIds.forEach(id => sourceQuery.append("sourceId", id));
+    const map = await request(baseUrl, "/api/concept-map?" + sourceQuery);
     const deadlock = map.concepts.find(concept => concept.matchedTerm === "deadlock");
     assert(deadlock, "Two overlapping sources should create a deadlock connection.");
     assert.match(deadlock.reason, /2 distinct ingested sources/, "The concept card must explain its real matching rule.");
     assert(deadlock.evidence.some(item => item.locationLabel.includes("00:02:00")), "The concept evidence must preserve a lecture timestamp.");
 
-    const answer = await request(baseUrl, "/api/ask", "POST", { question: "How does a graph indicate deadlock?" });
+    const answer = await request(baseUrl, "/api/ask", "POST", { question: "How does a graph indicate deadlock?", sourceIds });
     assert(answer.evidence.length > 0, "The tutor must retrieve real evidence before answering.");
 
-    const assessment = await request(baseUrl, "/api/assessment", "POST", { focus: "deadlock resource allocation graph" });
+    const assessment = await request(baseUrl, "/api/assessment", "POST", { focus: "deadlock resource allocation graph", sourceIds });
     assert.equal(assessment.options.length, 4, "A concept should create a four-option source check.");
-    const grade = await request(baseUrl, "/api/assessment/grade", "POST", { id: assessment.id, selectedIndex: 0 });
+    const grade = await request(baseUrl, "/api/assessment/grade", "POST", { id: assessment.id, selectedIndex: 0, sourceIds });
     assert(grade.studyPath.assessmentId, "Grading should produce an adaptive follow-up path.");
-    const followUp = await request(baseUrl, "/api/study-path/follow-up", "POST", { id: grade.studyPath.assessmentId });
+    const followUp = await request(baseUrl, "/api/study-path/follow-up", "POST", { id: grade.studyPath.assessmentId, sourceIds });
     assert.notEqual(followUp.id, assessment.id, "The follow-up should be a new source-backed check.");
 
     const demo = await request(baseUrl, "/api/demo", "POST");

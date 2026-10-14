@@ -1,5 +1,35 @@
 # Project Log - Multimodal AI Hackathon 2026
 
+## 2026-10-15 — LT-01 implemented: select the material you are studying
+
+### What changed
+
+Each upload now has a source ID independent of its title. PDF pages and PPTX slides share their file's ID, while captions and transcribed speech keep their lecture ID. Same-name files stay distinct in the library and concept map. Source previews make the selection understandable.
+
+The question panel lets the learner check a source set. Every answer and check request carries that set; the server validates and filters before retrieval. Concept connections use the same selection. Grading and follow-ups must match the check's original source set. Empty selections return 400; expired IDs or mismatched check selections return 409.
+
+Sample sources carry explicit isDemo metadata rather than relying on a filename prefix. Loading the sample module selects only its three sources. Personal uploads switch a sample-only selection back to the learner's own material. Choosing another set clears old answers/checks and shows practice history only for that set; stale responses from another selection are discarded in the answer/check generation paths.
+
+### Learning note
+
+Retrieval needs both a question and a scope. If an economics course and an operating-systems course both mention resources, a shared word should not grant permission to search both. Filtering by stable source IDs before ranking solves that boundary. It does not solve whether the selected passage actually answers the question—that remains LT-02.
+
+### Verification and activation
+
+The five suites pass in an isolated build: retrieval/PDF, quality, frontend, source-scope HTTP and learner journey. Source-scope tests use same-name uploads from unrelated subjects and verify answer, map, quiz, grade and follow-up isolation. Browser verification loaded the samples, switched to economics notes, and returned only economics evidence for a wages question. No live user material or paid model calls were used.
+
+The user's existing server was not restarted or cleared. The new frontend tolerates the old backend and labels selection as pending a restart. After a deliberate restart, the new capability activates; current in-memory uploads must be re-added. Persistence, semantic answerability and the other audit findings remain open.
+
+## 2026-10-15 — Feature-by-feature audit backlog
+
+At the user's request, reviewed the current submission without changing application code or using the live user's material. AUDIT_BACKLOG.md records 32 findings, each with severity, evidence and a completion check, plus an ordered repair plan.
+
+Offline probes confirmed nine failure examples: an unsupported date question still retrieved a word match; a mutex paraphrase found no evidence; an unpunctuated 9,000-character paragraph bypassed the intended chunk size; malformed caption timestamps were accepted; different source types with the same title collapsed in the concept map; a road-resource question received a deadlock concept; a false stubbed answer with a valid reference number was accepted; a well-formed unrelated stubbed quiz was accepted; and follow-up creation allowed an ungraded/replayed parent.
+
+The false answer/quiz were deliberately supplied test responses, not outputs observed from the live model. They establish missing validation, not a measured hallucination rate. No paid model calls, live playlist calls or live-corpus mutations were performed. No production files were repaired in this review. The existing untracked package-lock.json remains untouched.
+
+Proposed repair order: active source/course scope and answerability; measured retrieval and claim support; targeted quiz correctness and revision behavior; source/progress persistence; lecture and playlist reliability; interaction polish; then a real-course evaluation and live rehearsal. Public hosting, comprehensive vision and OCR remain separate scope decisions.
+
 ## 2026-10-15 — Study-desk UI refinement
 
 The learner-facing page had too many equal-weight panels, duplicate introduction blocks and fictional profile/streak information. The submission UI now uses a clearer visual hierarchy: two first-use choices, one source uploader, a question area, source connections and practice. Playlist discovery and the separate lecture/caption tools live in expandable sections after the core journey.

@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "test": "node tests/retrieval.test.js && node tests/quality.test.js && node tests/frontend.test.js && node tests/journey.test.js",
+    "test": "node tests/retrieval.test.js && node tests/quality.test.js && node tests/frontend.test.js && node tests/source-scope.test.js && node tests/journey.test.js",
     "eval:retrieval": "node eval/run-retrieval.js"
   },
   "engines": { "node": ">=18" }

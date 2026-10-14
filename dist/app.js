@@ -12,9 +12,73 @@ let serverReady = false;
 let activeAssessment = null;
 let activeStudyPath = null;
 let assessmentLoading = false;
+let assessmentRequest = 0;
 const gradedIds = new Set();
 let playlistItems = [];
 const selectedPlaylistVideos = new Set();
+
+
+let supportsSourceScope = false;
+let librarySources = [];
+let scopeVersion = 0;
+let selectedSourceIds = new Set();
+try {
+  const saved = JSON.parse(localStorage.getItem("learntrace.activeSources") || "[]");
+  if (Array.isArray(saved)) selectedSourceIds = new Set(saved.filter(id => typeof id === "string"));
+} catch { /* A new selection can always be made. */ }
+function scopeKey() { return JSON.stringify([...selectedSourceIds].sort()); }
+function sourceScope() {
+  if (!supportsSourceScope) return {};
+  if (!selectedSourceIds.size) throw new Error("Choose at least one source above before asking or practising.");
+  return { sourceIds: [...selectedSourceIds].sort() };
+}
+function chooseSources(ids) {
+  const next = new Set(ids);
+  if (JSON.stringify([...next].sort()) !== scopeKey()) {
+    selectedSourceIds = next; scopeVersion += 1;
+    try { localStorage.setItem("learntrace.activeSources", JSON.stringify([...next])); } catch {}
+    clearAssessment();
+    document.querySelector("#answer")?.classList.add("hidden");
+    renderConceptMap([]);
+    assessmentLoading = false; assessmentRequest += 1;
+    const mapStatus = document.querySelector("#concept-map-status");
+    if (mapStatus) mapStatus.textContent = "Selection changed. Rebuild connections using the selected material.";
+  }
+  renderSourceSelection(); renderMastery();
+}
+function renderSourceSelection() {
+  const list = document.querySelector("#scope-options");
+  const summary = document.querySelector("#scope-summary");
+  if (!list || !summary) return;
+  list.replaceChildren();
+  if (!supportsSourceScope) {
+    summary.textContent = "Source selection becomes available after the backend is restarted";
+    return;
+  }
+  const selected = librarySources.filter(source => selectedSourceIds.has(source.id));
+  summary.textContent = selected.length ? `Studying ${selected.length} source${selected.length === 1 ? "" : "s"}: ${selected.map(source => source.title).join(", ")}` : "Choose which material to study";
+  if (!librarySources.length) {
+    const empty = document.createElement("p"); empty.textContent = "Add a source or load the sample module to begin."; list.append(empty); return;
+  }
+  librarySources.forEach(source => {
+    const label = document.createElement("label");
+    const checkbox = document.createElement("input"); checkbox.type = "checkbox"; checkbox.checked = selectedSourceIds.has(source.id);
+    checkbox.addEventListener("change", () => {
+      const ids = new Set(selectedSourceIds);
+      if (checkbox.checked) ids.add(source.id); else ids.delete(source.id);
+      chooseSources([...ids]);
+    });
+    const title = document.createElement("span"); title.textContent = `${source.isDemo ? "Sample · " : ""}${source.title}`;
+    const preview = document.createElement("small"); preview.textContent = source.preview || `${source.type} · ${(source.locations || []).join(", ")}`;
+    const text = document.createElement("div"); text.append(title, preview);
+    label.append(checkbox, text); list.append(label);
+  });
+}
+function adoptUploadedSources(result) {
+  if (!supportsSourceScope || !result.addedSourceIds?.length) return;
+  const own = librarySources.filter(source => !source.isDemo && selectedSourceIds.has(source.id)).map(source => source.id);
+  chooseSources([...own, ...result.addedSourceIds]);
+}
 
 let statusRequest = null;
 let connectionDiagnostic = "";
@@ -35,6 +99,7 @@ async function refreshServerStatus() {
     }
     // Backend readiness depends only on its response, never optional display elements.
     serverReady = true; connectionDiagnostic = "";
+    supportsSourceScope = status.sourceScopingReady === true;
     const badge = document.querySelector("#server-status");
     if (badge) badge.textContent = `${status.chunks} source passages · ${status.modelReady ? "AI tutor configured" : "Source excerpt mode"}`;
     const count = document.querySelector("#source-count");
@@ -78,13 +143,18 @@ function renderSources(liveSources = null) {
   const grid = document.querySelector("#source-grid"); if (!grid) return; grid.innerHTML = "";
   const summary = document.querySelector("#source-summary");
   if (liveSources && liveSources.length) {
-    if (summary) summary.textContent = `${liveSources.length} real source${liveSources.length === 1 ? "" : "s"} in this study space`;
+    if (summary) summary.textContent = `${liveSources.length} loaded source${liveSources.length === 1 ? "" : "s"} in this study space`;
     liveSources.forEach(source => {
       const card = document.createElement("article"); const type = document.createElement("span"); type.className = "source-type"; type.textContent = source.type.toUpperCase();
       const title = document.createElement("h3"); title.textContent = source.title;
-      const description = document.createElement("p"); description.textContent = `${source.chunks} traceable evidence chunk${source.chunks === 1 ? "" : "s"} ready for tutor answers, checks, and concept connections.`;
+      const description = document.createElement("p"); description.textContent = source.preview || `${source.chunks} source passages ready for questions and practice.`;
       const meta = document.createElement("span"); meta.className = "source-meta"; meta.textContent = source.locations.join(" · ");
-      card.append(type, title, description, meta); grid.append(card);
+      card.append(type, title, description, meta);
+      if (supportsSourceScope && source.id) {
+        const use = document.createElement("button"); use.type = "button"; use.className = "use-source"; use.textContent = "Study this source →";
+        use.addEventListener("click", () => { chooseSources([source.id]); document.querySelector("#ask")?.scrollIntoView({ behavior: "smooth", block: "start" }); }); card.append(use);
+      }
+      grid.append(card);
     });
     return;
   }
@@ -94,14 +164,19 @@ function renderSources(liveSources = null) {
 async function refreshSourceLibrary() {
   if (!serverReady) return;
   try {
-    const result = await api("/api/sources"); renderSources(result.sources);
+    const result = await api("/api/sources");
+    librarySources = result.sources;
+    if (supportsSourceScope) chooseSources([...selectedSourceIds].filter(id => librarySources.some(source => source.id === id)));
+    renderSources(result.sources);
     if (result.sources.length >= 2 && document.querySelector("#concept-list")?.classList.contains("hidden")) {
-      const status = document.querySelector("#concept-map-status"); status.textContent = "Two or more sources are ready. Build the concept map to reveal shared evidence."; status.className = "concept-map-status";
+      const status = document.querySelector("#concept-map-status");
+      const count = supportsSourceScope ? selectedSourceIds.size : result.sources.length;
+      if (status) { status.textContent = count >= 2 ? "Build the concept map for your selected sources." : "Select at least two sources to find connections between them."; status.className = "concept-map-status"; }
     }
   } catch (error) { const summary = document.querySelector("#source-summary"); if (summary) summary.textContent = `Source library: ${error.message}`; }
 }
 function renderConceptMap(concepts) {
-  const list = document.querySelector("#concept-list"); list.innerHTML = "";
+  const list = document.querySelector("#concept-list"); if (!list) return; list.innerHTML = "";
   concepts.forEach(concept => {
     const node = document.createElement("details"); node.className = "concept-node";
     const summary = document.createElement("summary"); const title = document.createElement("h3"); title.textContent = concept.label;
@@ -128,19 +203,22 @@ async function loadConceptMap() {
   try { await ensureServerReady(); } catch (error) { status.textContent = error.message; status.className = "concept-map-status error"; return; }
   status.textContent = "Finding shared terms across your ingested evidence…"; status.className = "concept-map-status";
   try {
-    const response = await fetch("/api/concept-map"); const result = await response.json(); if (!response.ok) throw new Error(result.error);
+    const selected = sourceScope(); const version = scopeVersion;
+    const query = new URLSearchParams(); (selected.sourceIds || []).forEach(id => query.append("sourceId", id));
+    const result = await api(`/api/concept-map${query.size ? "?" + query : ""}`);
+    if (version !== scopeVersion) return;
     renderConceptMap(result.concepts);
     status.textContent = result.concepts.length ? `${result.concepts.length} evidence-backed connections found. Each concept appears in at least two sources.` : "No shared concepts yet. Add at least two sources that discuss overlapping ideas.";
   } catch (error) { status.textContent = error.message; status.className = "concept-map-status error"; }
 }
 function renderMastery() {
-  const items = Object.entries(mastery);
+  const items = Object.entries(mastery).filter(([, record]) => !supportsSourceScope || record.scopeKey === scopeKey());
   const list = document.querySelector("#mastery-list"); if (!list) return; list.replaceChildren();
   const overall = document.querySelector("#overall-score"); if (overall) overall.textContent = items.length ? `${items.length} study topics` : "No checks yet";
   if (!items.length) { const empty = document.createElement("p"); empty.textContent = "Your practice history starts here. Complete a source check to see what to revisit."; list.append(empty); return; }
   items.sort((a, b) => a[1].correct / a[1].attempts - b[1].correct / b[1].attempts).forEach(([name, record]) => {
     const row = document.createElement("div"); row.className = "practice-row";
-    const label = document.createElement("strong"); label.textContent = name;
+    const label = document.createElement("strong"); label.textContent = record.concept || name;
     const detail = document.createElement("small"); detail.textContent = `${record.correct} correct / ${record.attempts} checks · ${record.lastCorrect ? "Last check correct" : "Worth revisiting"}`;
     row.append(label, detail); list.append(row);
   });
@@ -165,12 +243,13 @@ function renderOptions(values = []) {
 }
 async function loadSourceCheck(focus) {
   if (assessmentLoading) return;
-  assessmentLoading = true; clearAssessment("Preparing a question from your source…");
+  assessmentLoading = true; const version = scopeVersion; const request = ++assessmentRequest; clearAssessment("Preparing a question from your source…");
   try {
-    const assessment = await api("/api/assessment", { focus });
+    const assessment = await api("/api/assessment", { focus, ...sourceScope() });
+    if (version !== scopeVersion) return;
     showAssessment(assessment, "Practice");
-  } catch (error) { clearAssessment(error.message); }
-  finally { assessmentLoading = false; }
+  } catch (error) { if (version === scopeVersion) clearAssessment(error.message); }
+  finally { if (request === assessmentRequest) assessmentLoading = false; }
 }
 function showAssessment(assessment, label) {
   activeAssessment = assessment; selected = null;
@@ -182,10 +261,12 @@ function showAssessment(assessment, label) {
 }
 async function loadFollowUpCheck() {
   if (!activeStudyPath) return document.querySelector("#check").scrollIntoView({ behavior: "smooth" });
+  const version = scopeVersion;
   const button = document.querySelector("#start-check"); button.disabled = true; button.textContent = "Building follow-up check…";
   try {
-    const response = await fetch("/api/study-path/follow-up", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: activeStudyPath.assessmentId }) });
+    const response = await fetch("/api/study-path/follow-up", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: activeStudyPath.assessmentId, ...sourceScope() }) });
     const assessment = await response.json(); if (!response.ok) throw new Error(assessment.error);
+    if (version !== scopeVersion) return;
     showAssessment(assessment, "Follow-up"); activeStudyPath = null;
     document.querySelector("#next-title").textContent = "Follow-up check ready"; document.querySelector("#next-copy").textContent = "This check uses another supported statement or a newly generated question. Inspect its cited passage after answering.";
     document.querySelector("#next-evidence").classList.add("hidden"); button.disabled = false; button.innerHTML = "Go to follow-up check <span>→</span>";
@@ -238,7 +319,7 @@ document.querySelector("#transcript-form")?.addEventListener("submit", async eve
   try { await ensureServerReady(); } catch (error) { status.textContent = error.message; status.className = "transcript-status error"; return; }
   if (!content.trim()) { status.textContent = "Attach or paste timed SRT/VTT captions first."; status.className = "transcript-status error"; return; }
   status.textContent = "Finding timestamped topic candidates from the transcript…"; status.className = "transcript-status";
-  try { const result = await api("/api/transcript-topic-map", { title, content }); renderTranscriptTopics(result.topics, "#transcript-topic-list"); document.querySelector("#transcript-results").classList.remove("hidden"); status.textContent = `${result.topics.length} transcript-grounded topic sections mapped; ${result.added} timestamped chunks are now available for questions.`; status.className = "transcript-status ready"; document.querySelector("#transcript-text").value = ""; document.querySelector("#transcript-file").value = ""; refreshServerStatus(); }
+  try { const result = await api("/api/transcript-topic-map", { title, content }); renderTranscriptTopics(result.topics, "#transcript-topic-list"); document.querySelector("#transcript-results").classList.remove("hidden"); status.textContent = `${result.topics.length} transcript-grounded topic sections mapped; ${result.added} timestamped chunks are now available for questions.`; status.className = "transcript-status ready"; document.querySelector("#transcript-text").value = ""; document.querySelector("#transcript-file").value = ""; await refreshServerStatus(); adoptUploadedSources(result); }
   catch (error) { status.textContent = error.message; status.className = "transcript-status error"; }
 });
 function bytesToBase64(bytes) { let binary = ""; const size = 8192; for (let index = 0; index < bytes.length; index += size) binary += String.fromCharCode(...bytes.subarray(index, index + size)); return btoa(binary); }
@@ -247,7 +328,7 @@ document.querySelector("#media-form")?.addEventListener("submit", async event =>
   if (!file) { status.textContent = "Choose a lecture audio or video file first."; status.className = "transcript-status error"; return; }
   if (file.size > 100_000_000) { status.textContent = "Choose media smaller than 100 MB for this local demo."; status.className = "transcript-status error"; return; }
   const title = document.querySelector("#media-title").value || file.name; const finishProgress = startMediaProgress(status, "lecture audio or video");
-  try { const bytes = new Uint8Array(await file.arrayBuffer()); const result = await api("/api/transcribe-media", { title, filename: file.name, base64: bytesToBase64(bytes) }); finishProgress(); renderTranscriptTopics(result.topics, "#media-topic-list"); document.querySelector("#media-results").classList.remove("hidden"); status.textContent = `${result.transcript.length} timed transcript cues and ${result.topics.length} topic sections created locally with ${result.model}. Inspect the evidence text before relying on it.`; status.className = "transcript-status ready"; document.querySelector("#media-file").value = ""; refreshServerStatus(); }
+  try { const bytes = new Uint8Array(await file.arrayBuffer()); const result = await api("/api/transcribe-media", { title, filename: file.name, base64: bytesToBase64(bytes) }); finishProgress(); renderTranscriptTopics(result.topics, "#media-topic-list"); document.querySelector("#media-results").classList.remove("hidden"); status.textContent = `${result.transcript.length} timed transcript cues and ${result.topics.length} topic sections created locally with ${result.model}. Inspect the evidence text before relying on it.`; status.className = "transcript-status ready"; document.querySelector("#media-file").value = ""; await refreshServerStatus(); adoptUploadedSources(result); }
   catch (error) { finishProgress(); status.textContent = friendlyMediaError(error); status.className = "transcript-status error"; }
 });
 async function api(route, body, { timeoutMs } = {}) {
@@ -273,13 +354,16 @@ async function api(route, body, { timeoutMs } = {}) {
 document.querySelector("#question-form")?.addEventListener("submit", async event => {
   event.preventDefault();
   const question = document.querySelector("#question").value.trim(); if (!question) return;
+  const version = scopeVersion;
   const button = event.currentTarget.querySelector("button"); if (button.disabled) return;
   const status = document.querySelector("#question-status");
   button.disabled = true; button.textContent = "Finding evidence…"; status.textContent = "";
   clearAssessment();
   try {
     await ensureServerReady();
-    const result = await api("/api/ask", { question }); showLiveAnswer(result);
+    const result = await api("/api/ask", { question, ...sourceScope() });
+    if (version !== scopeVersion) return;
+    showLiveAnswer(result);
     if (result.evidence.length && result.mode !== "insufficient_evidence") await loadSourceCheck(question);
   } catch (error) { status.textContent = error.message; }
   finally { button.disabled = false; button.textContent = "Find evidence ↗"; }
@@ -298,7 +382,9 @@ document.querySelector("#load-demo")?.addEventListener("click", async () => {
   button.disabled = true; button.textContent = "Loading evidence…"; status.textContent = "Adding clearly labelled sample sources…";
   try {
     const response = await fetch("/api/demo", { method: "POST" }); const result = await response.json(); if (!response.ok) throw new Error(result.error);
-    await refreshServerStatus(); await loadConceptMap();
+    await refreshServerStatus();
+    if (supportsSourceScope) chooseSources(result.sources.filter(source => source.isDemo).map(source => source.id));
+    await loadConceptMap();
     status.textContent = result.alreadyLoaded ? "Demo evidence is already ready. Open a concept card to continue." : `${result.added} demo evidence chunks are ready. Open a concept card, then ask the tutor or start a check.`;
     button.textContent = "Demo ready"; button.disabled = false; document.querySelector("#concept-map").scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) { status.textContent = error.message; button.textContent = "Try guided demo again"; button.disabled = false; }
@@ -327,7 +413,7 @@ document.querySelector("#ingest-form")?.addEventListener("submit", async event =
       if (["srt", "vtt"].includes(extension) || content.includes("-->")) result = await api("/api/transcript-topic-map", { title, content });
       else result = await api("/api/ingest", { title, sourceType: document.querySelector("#source-type").value, content });
     }
-    await refreshServerStatus();
+    await refreshServerStatus(); adoptUploadedSources(result);
     if (result.topics) {
       renderTranscriptTopics(result.topics, "#media-topic-list");
       document.querySelector("#media-results").classList.remove("hidden");
@@ -348,13 +434,14 @@ document.querySelector("#check-answer")?.addEventListener("click", async () => {
   const button = document.querySelector("#check-answer"); if (button.disabled) return;
   const assessment = activeAssessment; const selection = selected; button.disabled = true;
   try {
-    const result = await api("/api/assessment/grade", { id: assessment.id, selectedIndex: selection });
+    const result = await api("/api/assessment/grade", { id: assessment.id, selectedIndex: selection, ...(assessment.sourceIds ? { sourceIds: assessment.sourceIds } : {}) });
     if (activeAssessment?.id !== assessment.id) return;
     document.querySelectorAll(".option").forEach((option, index) => { option.disabled = true; if (index === result.correctIndex) option.classList.add("correct"); if (index === selection && !result.correct) option.classList.add("incorrect"); });
     if (!gradedIds.has(assessment.id)) {
-    const key = result.concept;
+      const currentScope = supportsSourceScope ? JSON.stringify(assessment.sourceIds) : "legacy";
+      const key = supportsSourceScope ? `${currentScope}::${result.concept}` : result.concept;
       const prior = mastery[key] || { attempts: 0, correct: 0 };
-      mastery[key] = { attempts: prior.attempts + 1, correct: prior.correct + Number(result.correct), lastCorrect: result.correct };
+      mastery[key] = { attempts: prior.attempts + 1, correct: prior.correct + Number(result.correct), lastCorrect: result.correct, concept: result.concept, scopeKey: currentScope };
       gradedIds.add(assessment.id);
     }
     activeStudyPath = result.studyPath;

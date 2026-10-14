@@ -28,6 +28,18 @@ Runtime discovery checks the project virtual environment, installed Python comma
 
 ## Implemented features
 
+### Choose your study sources
+
+The question panel lists the sources in the current workspace. Check the files that belong to your current study task. Answers, concept connections, quizzes, grading and follow-ups use that selection. Each upload has an ID separate from its filename, so identically named files remain distinct. Source previews help distinguish them.
+
+New uploads join your selected personal material; uploading after a sample-only session switches back to your own sources. Loading the sample module explicitly selects its three sources. A source card's “Study this source” button selects that source alone. Changing the selection clears old answers/checks and hides progress from other selections. No selection means no scoped question; an expired ID asks you to select material again.
+
+The selection is saved in this browser, but source contents are still held in server memory. This is source selection, not durable course storage or user-account isolation.
+
+Backend changes take effect after restarting Node in the terminal with your existing environment variables. A running older server continues using its prior behavior; the frontend labels source selection as pending restart until the backend advertises sourceScopingReady. Restarting still clears uploaded sources, so preserve originals and re-add them afterwards.
+
+API clients must send a nonempty sourceIds array from GET /api/sources for POST /api/ask and /api/assessment. Send the same sourceIds with grading and follow-up requests. GET /api/concept-map accepts repeated sourceId query parameters. Missing selections return 400; expired or mismatched selections return 409.
+
 - PDF text with page references, PPTX text with slide references, TXT/MD and timed SRT/VTT ingestion.
 - Local faster-whisper transcription of uploaded MP3/WAV/M4A/MP4/WebM/MOV/AVI, retaining timestamps. Limits: media 100 MB; PDF/PPTX 12 MB; browser text uploads 200 KB.
 - BM25 **lexical** retrieval. This matches words; embeddings and semantic retrieval are not implemented.
@@ -84,11 +96,12 @@ Live OpenAI and YouTube calls have not been verified during this audit. Stub tes
 node tests/retrieval.test.js
 node tests/quality.test.js
 node tests/frontend.test.js
+node tests/source-scope.test.js
 node tests/journey.test.js
 node eval/run-retrieval.js
 ```
 
-`npm.cmd test` runs all four suites on Windows without invoking PowerShell's blocked npm.ps1. The HTTP journey test starts a temporary loopback server and disables external keys. Quality tests cover stubbed model behavior, failures, repeat-safe grading, follow-up exhaustion, invalid citations, short PPTX slides and unique passage IDs. Frontend tests execute app.js against the actual HTML and cover optional elements, status diagnostics and recovery.
+`npm.cmd test` runs all five suites on Windows without invoking PowerShell's blocked npm.ps1. HTTP tests use temporary loopback servers with external keys disabled. Quality tests cover stubbed model behavior, failures, repeat-safe grading, follow-up exhaustion, invalid citations, short PPTX slides and unique passage IDs. Frontend tests cover initialization, diagnostics and selected-source request payloads. Source-scope tests verify isolation across answers, connections, quizzes, grading, follow-ups, samples and same-name uploads.
 
 The retrieval script is a small demo smoke check. Its source-level hit rates are **not** a final accuracy metric. A submission-quality evaluation needs independently labelled questions and actual course material, including paraphrases and unsupported questions.
 

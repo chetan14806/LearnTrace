@@ -22,7 +22,9 @@ const assessments = new Map();
 function tokens(text) {
   return (text.toLowerCase().match(/[a-z0-9][a-z0-9'-]*/g) || []).filter(word => word.length > 1 && !STOP_WORDS.has(word));
 }
+function sourceKey(chunk) { return chunk.sourceId || `${chunk.sourceType || "document"}\u0000${chunk.sourceTitle}`; }
 function chunkText(text, metadata) {
+  const sourceId = metadata.sourceId || crypto.randomUUID();
   const blocks = text.replace(/\r/g, "").split(/\n\s*\n+/).map(block => block.replace(/\s+/g, " ").trim()).filter(block => block.length > 0);
   const chunks = [];
   blocks.forEach(block => {
@@ -37,6 +39,7 @@ function chunkText(text, metadata) {
   return chunks.map((text, index) => ({
     id: crypto.randomUUID(),
     text,
+    sourceId, isDemo: Boolean(metadata.isDemo),
     sourceTitle: metadata.title,
     sourceType: metadata.sourceType,
     locationLabel: metadata.locationPrefix ? `${metadata.locationPrefix} ${index + 1}` : `Segment ${index + 1}`,
@@ -54,9 +57,10 @@ function captionCues(text) {
   }).filter(Boolean);
 }
 function captionToChunks(text, metadata) {
+  const sourceId = metadata.sourceId || crypto.randomUUID();
   const cues = captionCues(text);
-  if (!cues.length) return chunkText(text, { ...metadata, locationPrefix: "Transcript segment" });
-  return cues.map((cue, index) => ({ id: crypto.randomUUID(), text: cue.text, sourceTitle: metadata.title, sourceType: "transcript", locationLabel: `${cue.start} - ${cue.end}`, tokenCount: tokens(cue.text).length }));
+  if (!cues.length) return chunkText(text, { ...metadata, sourceId, locationPrefix: "Transcript segment" });
+  return cues.map((cue, index) => ({ id: crypto.randomUUID(), sourceId, isDemo: Boolean(metadata.isDemo), text: cue.text, sourceTitle: metadata.title, sourceType: "transcript", locationLabel: `${cue.start} - ${cue.end}`, tokenCount: tokens(cue.text).length }));
 }
 function readableTopicLabel(terms) {
   const found = new Set(terms);
@@ -88,7 +92,7 @@ function conceptMap(inputCorpus = corpus, limit = 8) {
     uniqueTerms.forEach(term => {
       if (!concepts.has(term)) concepts.set(term, new Map());
       const sources = concepts.get(term);
-      if (!sources.has(chunk.sourceTitle)) sources.set(chunk.sourceTitle, { sourceTitle: chunk.sourceTitle, sourceType: chunk.sourceType, locationLabel: chunk.locationLabel, text: chunk.text });
+      if (!sources.has(sourceKey(chunk))) sources.set(sourceKey(chunk), { sourceId: sourceKey(chunk), sourceTitle: chunk.sourceTitle, sourceType: chunk.sourceType, locationLabel: chunk.locationLabel, text: chunk.text });
     });
   });
   return [...concepts.entries()]
@@ -101,22 +105,21 @@ function conceptMap(inputCorpus = corpus, limit = 8) {
 function sourceLibrary(inputCorpus = corpus) {
   const grouped = new Map();
   inputCorpus.forEach(chunk => {
-    const key = `${chunk.sourceTitle}\u0000${chunk.sourceType}`;
-    if (!grouped.has(key)) grouped.set(key, { title: chunk.sourceTitle, type: chunk.sourceType, chunks: 0, locations: [] });
+    const key = sourceKey(chunk);
+    if (!grouped.has(key)) grouped.set(key, { id: key, isDemo: Boolean(chunk.isDemo), preview: chunk.text.slice(0, 140), title: chunk.sourceTitle, type: chunk.sourceType, chunks: 0, locations: [] });
     const source = grouped.get(key); source.chunks += 1;
     if (source.locations.length < 3 && !source.locations.includes(chunk.locationLabel)) source.locations.push(chunk.locationLabel);
   });
   return [...grouped.values()];
 }
 function demoEvidenceChunks() {
-  const textbook = chunkText("A deadlock occurs when processes wait indefinitely for resources. A resource-allocation graph represents processes and resources as nodes. With one instance of each resource type, a cycle in the graph indicates deadlock.", { title: "Demo textbook · Deadlock foundations", sourceType: "textbook", locationPrefix: "Page 18, passage" });
-  const slides = chunkText("Deadlock detection: inspect the resource-allocation graph for cycles. A process-to-resource edge is a request; a resource-to-process edge is an allocation. The graph provides evidence about resource waiting.", { title: "Demo slides · Resource graphs", sourceType: "slides", locationPrefix: "Slide 7, passage" });
-  const lecture = captionToChunks("WEBVTT\n\n00:01:12.000 --> 00:01:20.000\nA resource-allocation graph helps us trace which process is waiting for which resource.\n\n00:01:21.000 --> 00:01:31.000\nWhen every resource has one instance, a cycle in that graph can indicate deadlock.\n\n00:01:32.000 --> 00:01:40.000\nWe use the graph to reason about resource allocation and deadlock detection.", { title: "Demo lecture · Cycles and deadlock", sourceType: "transcript" });
+  const textbook = chunkText("A deadlock occurs when processes wait indefinitely for resources. A resource-allocation graph represents processes and resources as nodes. With one instance of each resource type, a cycle in the graph indicates deadlock.", { title: "Demo textbook · Deadlock foundations", sourceId: "demo:textbook", isDemo: true, sourceType: "textbook", locationPrefix: "Page 18, passage" });
+  const slides = chunkText("Deadlock detection: inspect the resource-allocation graph for cycles. A process-to-resource edge is a request; a resource-to-process edge is an allocation. The graph provides evidence about resource waiting.", { title: "Demo slides · Resource graphs", sourceId: "demo:slides", isDemo: true, sourceType: "slides", locationPrefix: "Slide 7, passage" });
+  const lecture = captionToChunks("WEBVTT\n\n00:01:12.000 --> 00:01:20.000\nA resource-allocation graph helps us trace which process is waiting for which resource.\n\n00:01:21.000 --> 00:01:31.000\nWhen every resource has one instance, a cycle in that graph can indicate deadlock.\n\n00:01:32.000 --> 00:01:40.000\nWe use the graph to reason about resource allocation and deadlock detection.", { title: "Demo lecture · Cycles and deadlock", sourceId: "demo:lecture", isDemo: true, sourceType: "transcript" });
   return [...textbook, ...slides, ...lecture];
 }
 function loadDemoEvidence() {
-  const prefix = "Demo ";
-  const alreadyLoaded = corpus.some(chunk => chunk.sourceTitle.startsWith(prefix));
+  const alreadyLoaded = corpus.some(chunk => chunk.isDemo);
   if (alreadyLoaded) return { added: 0, alreadyLoaded: true, sources: sourceLibrary() };
   const chunks = demoEvidenceChunks(); corpus.push(...chunks);
   return { added: chunks.length, alreadyLoaded: false, sources: sourceLibrary() };
@@ -161,6 +164,7 @@ function extractiveAnswer(question, evidence) {
   return { answer: `Closest source excerpt:\n“${firstSentences}”`, mode: "extractive_fallback" };
 }
 async function pdfToPageChunks(pdfBuffer, title) {
+  const sourceId = crypto.randomUUID();
   if (pdfBuffer.length > MAX_PDF_BYTES) throw new Error("PDF is too large for the local demo limit (12 MB).");
   const temporaryPath = path.join(os.tmpdir(), `learntrace-${crypto.randomUUID()}.pdf`);
   await fs.promises.writeFile(temporaryPath, pdfBuffer);
@@ -169,19 +173,20 @@ async function pdfToPageChunks(pdfBuffer, title) {
     const pages = JSON.parse(stdout);
     if (!pages.length) throw new Error("Could not determine the PDF page count.");
     const chunks = [];
-    pages.forEach((pageText, index) => chunks.push(...chunkText(pageText, { title, sourceType: "pdf", locationPrefix: `Page ${index + 1}, passage` })));
+    pages.forEach((pageText, index) => chunks.push(...chunkText(pageText, { title, sourceId, sourceType: "pdf", locationPrefix: `Page ${index + 1}, passage` })));
     if (!chunks.length) throw new Error("No readable text was found. This may be a scanned PDF and needs OCR.");
     return chunks;
   } finally { await fs.promises.unlink(temporaryPath).catch(() => {}); }
 }
 async function pptxToSlideChunks(pptxBuffer, title) {
+  const sourceId = crypto.randomUUID();
   if (pptxBuffer.length > MAX_OFFICE_BYTES) throw new Error("PPTX is too large for the local demo limit (12 MB).");
   const temporaryPath = path.join(os.tmpdir(), `learntrace-${crypto.randomUUID()}.pptx`);
   await fs.promises.writeFile(temporaryPath, pptxBuffer);
   try {
     const { stdout } = await runPython("zipfile", ["-c", PPTX_EXTRACT_SCRIPT, temporaryPath]);
     const slides = JSON.parse(stdout); const chunks = [];
-    slides.forEach((text, index) => chunks.push(...chunkText(text, { title, sourceType: "slides", locationPrefix: `Slide ${index + 1}, passage` })));
+    slides.forEach((text, index) => chunks.push(...chunkText(text, { title, sourceId, sourceType: "slides", locationPrefix: `Slide ${index + 1}, passage` })));
     if (!chunks.length) throw new Error("No readable slide text was found in this presentation.");
     return chunks;
   } finally { await fs.promises.unlink(temporaryPath).catch(() => {}); }
@@ -326,27 +331,49 @@ async function playlistMap(url, options = {}) {
   } while (pageToken);
   return mapPlaylistItems(items);
 }
+
+function requestError(message, status = 400) { return Object.assign(new Error(message), { status }); }
+function selectedCorpus(sourceIds, inputCorpus = corpus) {
+  if (!Array.isArray(sourceIds) || !sourceIds.length || sourceIds.some(id => typeof id !== "string")) throw requestError("Choose at least one source in your study selection.");
+  const known = new Set(inputCorpus.map(sourceKey));
+  if (sourceIds.some(id => !known.has(id))) throw requestError("Your source selection has expired. Refresh the library and select your sources again.", 409);
+  const ids = new Set(sourceIds);
+  return inputCorpus.filter(chunk => ids.has(sourceKey(chunk)));
+}
+function bindScope(item, sourceIds) {
+  if (!item) return null;
+  const ids = [...new Set(sourceIds)].sort();
+  assessments.get(item.id).sourceIds = ids;
+  return { ...item, sourceIds: ids };
+}
+function checkScope(id, sourceIds) {
+  const record = assessments.get(id);
+  if (!record) throw requestError("This check has expired. Create a new check.", 409);
+  if (!Array.isArray(sourceIds) || JSON.stringify([...new Set(sourceIds)].sort()) !== JSON.stringify(record.sourceIds)) throw requestError("This check belongs to a different source selection. Create a new check for the selected material.", 409);
+  return record;
+}
+
 const types = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "application/javascript; charset=utf-8" };
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, `http://${request.headers.host}`);
   try {
-    if (request.method === "GET" && url.pathname === "/api/status") return send(response, 200, { retrievalReady: true, chunks: corpus.length, modelReady: Boolean(process.env.OPENAI_API_KEY), modelName: process.env.OPENAI_API_KEY ? (process.env.OPENAI_MODEL || "gpt-6-astra") : null, playlistReady: Boolean(process.env.YOUTUBE_API_KEY), transcriptionReady: null, transcriptionModel: process.env.LEARNTRACE_WHISPER_MODEL || "base.en" });
-    if (request.method === "POST" && url.pathname === "/api/ingest") { const data = await readBody(request); if (typeof data.content !== "string" || data.content.trim().length < 30) return send(response, 400, { error: "Add at least a short paragraph of material." }); const metadata = { title: String(data.title || "Untitled source").slice(0, 120), sourceType: String(data.sourceType || "document").slice(0, 40), locationPrefix: "Passage" }; const added = metadata.sourceType === "transcript" ? captionToChunks(data.content, metadata) : chunkText(data.content, metadata); corpus.push(...added); return send(response, 201, { added: added.length, chunks: corpus.length, sources: [...new Set(corpus.map(chunk => chunk.sourceTitle))] }); }
-    if (request.method === "POST" && url.pathname === "/api/transcript-topic-map") { const data = await readBody(request); if (typeof data.content !== "string" || data.content.trim().length < 30) return send(response, 400, { error: "Add a timed SRT or VTT transcript first." }); const title = String(data.title || "Untitled lecture transcript").slice(0, 120); const topics = transcriptTopicMap(data.content, title); const chunks = captionToChunks(data.content, { title, sourceType: "transcript" }); corpus.push(...chunks); return send(response, 201, { topics, added: chunks.length, chunks: corpus.length, boundary: "Topic candidates are derived from the supplied transcript words and timestamps." }); }
-    if (request.method === "POST" && url.pathname === "/api/transcribe-media") { const data = await readBody(request, MAX_MEDIA_BYTES * 1.4); if (typeof data.base64 !== "string" || !data.base64) return send(response, 400, { error: "Choose an audio or video file first." }); const title = String(data.title || data.filename || "Untitled lecture").slice(0, 120); const result = await transcribeMedia(Buffer.from(data.base64, "base64"), String(data.filename || ""), title); corpus.push(...result.chunks); return send(response, 201, { topics: result.topics, transcript: result.cues, timedTranscript: result.captionText, added: result.chunks.length, chunks: corpus.length, model: result.model, boundary: "Transcript and topic candidates were created locally from this uploaded media. Speech recognition can contain errors; inspect the evidence text." }); }
-    if (request.method === "POST" && url.pathname === "/api/ingest-pdf") { const data = await readBody(request, MAX_PDF_BYTES * 1.4); if (typeof data.base64 !== "string" || !data.base64) return send(response, 400, { error: "Choose a PDF first." }); const pdfBuffer = Buffer.from(data.base64, "base64"); const added = await pdfToPageChunks(pdfBuffer, String(data.title || "Untitled PDF").slice(0, 120)); corpus.push(...added); return send(response, 201, { added: added.length, chunks: corpus.length, sources: [...new Set(corpus.map(chunk => chunk.sourceTitle))] }); }
-    if (request.method === "POST" && url.pathname === "/api/ingest-pptx") { const data = await readBody(request, MAX_OFFICE_BYTES * 1.4); if (typeof data.base64 !== "string" || !data.base64) return send(response, 400, { error: "Choose a PowerPoint file first." }); const added = await pptxToSlideChunks(Buffer.from(data.base64, "base64"), String(data.title || "Untitled slides").slice(0, 120)); corpus.push(...added); return send(response, 201, { added: added.length, chunks: corpus.length, sources: [...new Set(corpus.map(chunk => chunk.sourceTitle))] }); }
-    if (request.method === "POST" && url.pathname === "/api/ask") { const data = await readBody(request); if (typeof data.question !== "string" || !data.question.trim()) return send(response, 400, { error: "Ask a question first." }); const evidence = retrieve(data.question); let result; try { result = evidence.length ? await modelAnswer(data.question, evidence) : null; } catch (error) { result = { ...extractiveAnswer(data.question, evidence), modelWarning: "The model was unavailable, so LearnTrace returned only the retrieved evidence." }; } if (!result) result = extractiveAnswer(data.question, evidence); return send(response, 200, { ...result, retrieval: { method: "BM25 lexical ranking", queryTerms: tokens(data.question) }, evidence: evidence.map(({ id, text, sourceTitle, sourceType, locationLabel, score, matchedTerms }) => ({ id, text, sourceTitle, sourceType, locationLabel, score: Number(score.toFixed(2)), matchedTerms })) }); }
-    if (request.method === "POST" && url.pathname === "/api/assessment") { const data = await readBody(request); if (typeof data.focus !== "string" || !data.focus.trim()) return send(response, 400, { error: "Ask a source question first so LearnTrace can build a check." }); const assessment = await createAssessmentAI(data.focus); if (!assessment) return send(response, 404, { error: "No source evidence was found for that check." }); return send(response, 201, assessment); }
-    if (request.method === "POST" && url.pathname === "/api/assessment/grade") { const data = await readBody(request); return send(response, 200, gradeAssessment(data.id, data.selectedIndex)); }
-    if (request.method === "POST" && url.pathname === "/api/study-path/follow-up") { const data = await readBody(request); if (typeof data.id !== "string") return send(response, 400, { error: "A completed source check is required for a follow-up." }); return send(response, 201, await createFollowUpAssessmentAI(data.id)); }
+    if (request.method === "GET" && url.pathname === "/api/status") return send(response, 200, { retrievalReady: true, sourceScopingReady: true, chunks: corpus.length, modelReady: Boolean(process.env.OPENAI_API_KEY), modelName: process.env.OPENAI_API_KEY ? (process.env.OPENAI_MODEL || "gpt-6-astra") : null, playlistReady: Boolean(process.env.YOUTUBE_API_KEY), transcriptionReady: null, transcriptionModel: process.env.LEARNTRACE_WHISPER_MODEL || "base.en" });
+    if (request.method === "POST" && url.pathname === "/api/ingest") { const data = await readBody(request); if (typeof data.content !== "string" || data.content.trim().length < 30) return send(response, 400, { error: "Add at least a short paragraph of material." }); const metadata = { title: String(data.title || "Untitled source").slice(0, 120), sourceType: String(data.sourceType || "document").slice(0, 40), locationPrefix: "Passage" }; const added = metadata.sourceType === "transcript" ? captionToChunks(data.content, metadata) : chunkText(data.content, metadata); corpus.push(...added); return send(response, 201, { addedSourceIds: [...new Set(added.map(sourceKey))], added: added.length, chunks: corpus.length, sources: [...new Set(corpus.map(chunk => chunk.sourceTitle))] }); }
+    if (request.method === "POST" && url.pathname === "/api/transcript-topic-map") { const data = await readBody(request); if (typeof data.content !== "string" || data.content.trim().length < 30) return send(response, 400, { error: "Add a timed SRT or VTT transcript first." }); const title = String(data.title || "Untitled lecture transcript").slice(0, 120); const topics = transcriptTopicMap(data.content, title); const chunks = captionToChunks(data.content, { title, sourceType: "transcript" }); corpus.push(...chunks); return send(response, 201, { topics, addedSourceIds: [...new Set(chunks.map(sourceKey))], added: chunks.length, chunks: corpus.length, boundary: "Topic candidates are derived from the supplied transcript words and timestamps." }); }
+    if (request.method === "POST" && url.pathname === "/api/transcribe-media") { const data = await readBody(request, MAX_MEDIA_BYTES * 1.4); if (typeof data.base64 !== "string" || !data.base64) return send(response, 400, { error: "Choose an audio or video file first." }); const title = String(data.title || data.filename || "Untitled lecture").slice(0, 120); const result = await transcribeMedia(Buffer.from(data.base64, "base64"), String(data.filename || ""), title); corpus.push(...result.chunks); return send(response, 201, { topics: result.topics, transcript: result.cues, timedTranscript: result.captionText, addedSourceIds: [...new Set(result.chunks.map(sourceKey))], added: result.chunks.length, chunks: corpus.length, model: result.model, boundary: "Transcript and topic candidates were created locally from this uploaded media. Speech recognition can contain errors; inspect the evidence text." }); }
+    if (request.method === "POST" && url.pathname === "/api/ingest-pdf") { const data = await readBody(request, MAX_PDF_BYTES * 1.4); if (typeof data.base64 !== "string" || !data.base64) return send(response, 400, { error: "Choose a PDF first." }); const pdfBuffer = Buffer.from(data.base64, "base64"); const added = await pdfToPageChunks(pdfBuffer, String(data.title || "Untitled PDF").slice(0, 120)); corpus.push(...added); return send(response, 201, { addedSourceIds: [...new Set(added.map(sourceKey))], added: added.length, chunks: corpus.length, sources: [...new Set(corpus.map(chunk => chunk.sourceTitle))] }); }
+    if (request.method === "POST" && url.pathname === "/api/ingest-pptx") { const data = await readBody(request, MAX_OFFICE_BYTES * 1.4); if (typeof data.base64 !== "string" || !data.base64) return send(response, 400, { error: "Choose a PowerPoint file first." }); const added = await pptxToSlideChunks(Buffer.from(data.base64, "base64"), String(data.title || "Untitled slides").slice(0, 120)); corpus.push(...added); return send(response, 201, { addedSourceIds: [...new Set(added.map(sourceKey))], added: added.length, chunks: corpus.length, sources: [...new Set(corpus.map(chunk => chunk.sourceTitle))] }); }
+    if (request.method === "POST" && url.pathname === "/api/ask") { const data = await readBody(request); if (typeof data.question !== "string" || !data.question.trim()) return send(response, 400, { error: "Ask a question first." }); const scoped = selectedCorpus(data.sourceIds); const evidence = retrieve(data.question, scoped); let result; try { result = evidence.length ? await modelAnswer(data.question, evidence) : null; } catch (error) { result = { ...extractiveAnswer(data.question, evidence), modelWarning: "The model was unavailable, so LearnTrace returned only the retrieved evidence." }; } if (!result) result = extractiveAnswer(data.question, evidence); return send(response, 200, { ...result, sourceIds: [...new Set(data.sourceIds)].sort(), retrieval: { method: "BM25 lexical ranking", queryTerms: tokens(data.question) }, evidence: evidence.map(({ id, sourceId, text, sourceTitle, sourceType, locationLabel, score, matchedTerms }) => ({ id, sourceId, text, sourceTitle, sourceType, locationLabel, score: Number(score.toFixed(2)), matchedTerms })) }); }
+    if (request.method === "POST" && url.pathname === "/api/assessment") { const data = await readBody(request); if (typeof data.focus !== "string" || !data.focus.trim()) return send(response, 400, { error: "Ask a source question first so LearnTrace can build a check." }); const scoped = selectedCorpus(data.sourceIds); const assessment = bindScope(await createAssessmentAI(data.focus, scoped), data.sourceIds); if (!assessment) return send(response, 404, { error: "No source evidence was found for that check." }); return send(response, 201, assessment); }
+    if (request.method === "POST" && url.pathname === "/api/assessment/grade") { const data = await readBody(request); checkScope(data.id, data.sourceIds); return send(response, 200, { ...gradeAssessment(data.id, data.selectedIndex), sourceIds: assessments.get(data.id).sourceIds }); }
+    if (request.method === "POST" && url.pathname === "/api/study-path/follow-up") { const data = await readBody(request); if (typeof data.id !== "string") return send(response, 400, { error: "A completed source check is required for a follow-up." }); const scoped = selectedCorpus(data.sourceIds); checkScope(data.id, data.sourceIds); return send(response, 201, bindScope(await createFollowUpAssessmentAI(data.id, scoped), data.sourceIds)); }
     if (request.method === "POST" && url.pathname === "/api/playlist") { const data = await readBody(request); return send(response, 200, { items: await playlistMap(data.url) }); }
     if (request.method === "POST" && url.pathname === "/api/demo") return send(response, 201, { ...loadDemoEvidence(), boundary: "Demo sources are clearly labelled seeded learning material. They are included so judges can inspect the real evidence, concept-map, tutor, and assessment flow without uploading files." });
     if (request.method === "GET" && url.pathname === "/api/sources") return send(response, 200, { sources: sourceLibrary() });
-    if (request.method === "GET" && url.pathname === "/api/concept-map") return send(response, 200, { concepts: conceptMap(), boundary: "Connections are terms that occur in two or more distinct ingested sources. Each connection shows the source evidence that contains the term." });
+    if (request.method === "GET" && url.pathname === "/api/concept-map") return send(response, 200, { concepts: conceptMap(selectedCorpus(url.searchParams.getAll("sourceId"))), boundary: "Connections are terms that occur in two or more distinct ingested sources. Each connection shows the source evidence that contains the term." });
     if (request.method === "GET") { let file = url.pathname === "/" ? path.join(DIST, "index.html") : path.resolve(DIST, `.${url.pathname}`); if (file !== DIST && !file.startsWith(DIST + path.sep)) return send(response, 403, { error: "Forbidden" }); fs.readFile(file, (error, content) => { if (error) { response.writeHead(404); return response.end("Not found"); } response.writeHead(200, { "Content-Type": types[path.extname(file)] || "application/octet-stream" }); response.end(content); }); return; }
     send(response, 404, { error: "Not found" });
-  } catch (error) { send(response, 500, { error: error.message || "Unexpected server error." }); }
+  } catch (error) { send(response, error.status || 500, { error: error.message || "Unexpected server error." }); }
 });
 if (require.main === module) server.listen(PORT, "127.0.0.1", () => console.log(`LearnTrace is running at http://localhost:${PORT}`));
-module.exports = { server, chunkText, captionCues, captionToChunks, readableTopicLabel, transcriptTopicMap, conceptMap, sourceLibrary, demoEvidenceChunks, loadDemoEvidence, timestampFromSeconds, captionTextFromCues, transcribeMedia, retrieve, extractiveAnswer, buildGroundedModelRequest, shouldRequestModel, createAssessment, createFollowUpAssessment, createAssessmentAI, createFollowUpAssessmentAI, modelQuizItem, modelAnswer, gradeAssessment, playlistIdFromUrl, mapPlaylistItems, playlistMap, pdfToPageChunks, pptxToSlideChunks };
+module.exports = { sourceKey, selectedCorpus, server, chunkText, captionCues, captionToChunks, readableTopicLabel, transcriptTopicMap, conceptMap, sourceLibrary, demoEvidenceChunks, loadDemoEvidence, timestampFromSeconds, captionTextFromCues, transcribeMedia, retrieve, extractiveAnswer, buildGroundedModelRequest, shouldRequestModel, createAssessment, createFollowUpAssessment, createAssessmentAI, createFollowUpAssessmentAI, modelQuizItem, modelAnswer, gradeAssessment, playlistIdFromUrl, mapPlaylistItems, playlistMap, pdfToPageChunks, pptxToSlideChunks };

@@ -10,19 +10,20 @@ function response(value, status = 200) { return { ok: status < 400, status, json
 function harness({ missing = [], fetchImpl } = {}) {
   const nodes = new Map(); const calls = [];
   function element() {
-    return { textContent: '', innerHTML: '', className: '', value: '', files: [], disabled: false, handlers: {},
+    return { textContent: '', innerHTML: '', className: '', value: '', files: [], disabled: false, handlers: {}, children: [],
       classList: { add() {}, remove() {}, toggle() {}, contains() { return true; } },
       addEventListener(name, fn) { this.handlers[name] = fn; },
-      append() {}, replaceChildren() {}, scrollIntoView() {}, focus() {}, setAttribute() {},
+      append(...items) { this.children.push(...items); }, replaceChildren() { this.children = []; }, scrollIntoView() {}, focus() {}, setAttribute() {},
       querySelector() { return element(); } };
   }
   for (const match of html.matchAll(/\bid="([^"]+)"/g)) nodes.set('#' + match[1], element());
+  nodes.set('#answer .grounded', element());
   missing.forEach(id => nodes.delete(id));
   const context = vm.createContext({
     document: { querySelector: selector => nodes.get(selector) || null, querySelectorAll: () => [], createElement: element },
     localStorage: { getItem: () => null, setItem() {} },
     location: { protocol: 'http:', origin: 'http://127.0.0.1:4173' },
-    window: { setTimeout }, AbortSignal, Uint8Array, btoa, console,
+    window: { setTimeout }, URLSearchParams, AbortSignal, Uint8Array, btoa, console,
     fetch: async (route, options) => {
       calls.push({ route, options });
       if (fetchImpl) return fetchImpl(route, options);
@@ -81,5 +82,30 @@ function harness({ missing = [], fetchImpl } = {}) {
   upload.nodes.get('#source-text').value = 'WEBVTT\n\n00:00:00.000 --> 00:00:02.000\nA cycle can indicate deadlock.';
   await upload.nodes.get('#ingest-form').handlers.submit({ preventDefault() {}, currentTarget: upload.nodes.get('#ingest-form') });
   assert.match(upload.nodes.get('#ingest-status').textContent, /Added/, 'Missing file-name and lecture-tools must not turn successful ingestion into an error');
+  const scopedSources = [
+    { id: 'a', title: 'Course A', type: 'textbook', chunks: 1, locations: ['Page 1'] },
+    { id: 'b', title: 'Course B', type: 'textbook', chunks: 1, locations: ['Page 2'] }
+  ];
+  const scopedEvidence = { text: 'A deadlock occurs when processes wait for resources.', sourceTitle: 'Course A', locationLabel: 'Page 1', sourceType: 'textbook', matchedTerms: ['deadlock'] };
+  const scopedApp = harness({ fetchImpl: async route => {
+    if (route === '/api/status') return response({ ...ready, sourceScopingReady: true });
+    if (route === '/api/sources') return response({ sources: scopedSources });
+    if (route === '/api/ask') return response({ answer: 'A deadlock occurs.', mode: 'extractive_fallback', evidence: [scopedEvidence] });
+    if (route === '/api/assessment') return response({ id: 'check-a', concept: 'Deadlock', generator: 'template', sourceIds: ['a'], question: 'Which statement?', options: ['a', 'b', 'c', 'd'], evidence: scopedEvidence });
+    if (route.startsWith('/api/concept-map')) return response({ concepts: [] });
+    return response({});
+  } });
+  await scopedApp.run('refreshServerStatus()');
+  assert.throws(() => scopedApp.run('sourceScope()'), /Choose at least one source/);
+  scopedApp.run("chooseSources(['a'])");
+  scopedApp.nodes.get('#question').value = 'Explain deadlock.';
+  await scopedApp.nodes.get('#question-form').handlers.submit({ preventDefault() {}, currentTarget: scopedApp.nodes.get('#question-form') });
+  assert.deepEqual(JSON.parse(scopedApp.calls.find(call => call.route === '/api/ask').options.body).sourceIds, ['a']);
+  assert.deepEqual(JSON.parse(scopedApp.calls.find(call => call.route === '/api/assessment').options.body).sourceIds, ['a']);
+  await scopedApp.run('loadConceptMap()');
+  assert(scopedApp.calls.some(call => call.route === '/api/concept-map?sourceId=a'));
+  scopedApp.run("chooseSources(['b'])");
+  assert.equal(scopedApp.run('activeAssessment'), null, 'Changing sources must clear an earlier check');
+  assert.deepEqual(JSON.parse(scopedApp.run('JSON.stringify(sourceScope().sourceIds)')), ['b']);
   console.log('Frontend regression tests passed: actual HTML initialization, optional elements, status diagnostics, recovery, playlist and media readiness.');
 })().catch(error => { console.error(error); process.exitCode = 1; });
