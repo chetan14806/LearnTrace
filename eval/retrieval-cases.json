@@ -1,0 +1,6 @@
+[
+  { "question": "How does a resource-allocation graph help detect deadlock?", "expectedSource": "Demo slides · Resource graphs" },
+  { "question": "What does a cycle mean when every resource has one instance?", "expectedSource": "Demo textbook · Deadlock foundations" },
+  { "question": "Which timestamped lecture discusses a deadlock cycle?", "expectedSource": "Demo lecture · Cycles and deadlock" },
+  { "question": "How should I configure a database index?", "expectUnsupported": true }
+]
