@@ -1,5 +1,15 @@
 # Project Log - Multimodal AI Hackathon 2026
 
+## 2026-10-15 — Study-desk UI refinement
+
+The learner-facing page had too many equal-weight panels, duplicate introduction blocks and fictional profile/streak information. The submission UI now uses a clearer visual hierarchy: two first-use choices, one source uploader, a question area, source connections and practice. Playlist discovery and the separate lecture/caption tools live in expandable sections after the core journey.
+
+The palette is warm off-white with a dark green navigation rail, pale green actions and a restrained gold revision card. Typography, spacing, upload controls, source cards, evidence citations, quiz states and empty states share one stylesheet. The original inline CSS was consolidated into styles.css. The first-use heading and all functional controls remain connected to the existing backend. The stray literal backtick-n in the question markup was removed. Fictional student, streak and exam counters were removed; progress begins empty.
+
+Mobile uses compact navigation, stacked sections, visible file-picker controls and no hidden connection status. The add-material action focuses its field without pulling the page away from the upload heading. Keyboard focus indicators and reduced-motion support are included. Navigation links visibly select when clicked.
+
+Verification: frontend regression and HTTP learner-journey suites passed against the redesigned HTML. Actual browser inspection succeeded on the user's running server at port 4173 with existing sources intact and AI configuration shown. Desktop and 390 px mobile layouts were inspected; the mobile page had no horizontal overflow. The first-use upload action and expandable paste-notes entry were exercised without submitting or modifying the user's material. Backend code, API keys and running server were not changed.
+
 ## 2026-10-15 — Submission readiness bug fixed
 
 Worked in D:\projects\LearnTrace-submission, the existing Git repository named in the request. Preserved the pre-existing untracked package-lock.json and the current UI.

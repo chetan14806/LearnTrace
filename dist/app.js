@@ -290,7 +290,7 @@ document.querySelectorAll(".suggestions button").forEach(button => button.addEve
 }));
 document.querySelector("#start-check")?.addEventListener("click", loadFollowUpCheck);
 document.querySelector("#refresh-concept-map")?.addEventListener("click", loadConceptMap);
-document.querySelector("#start-own")?.addEventListener("click", () => { document.querySelector("#ingest").scrollIntoView({ behavior: "smooth", block: "start" }); window.setTimeout(() => document.querySelector("#source-title").focus(), 350); });
+document.querySelector("#start-own")?.addEventListener("click", () => { document.querySelector("#ingest").scrollIntoView({ behavior: "smooth", block: "start" }); window.setTimeout(() => document.querySelector("#source-title")?.focus({ preventScroll: true }), 350); });
 document.querySelector("#start-demo")?.addEventListener("click", () => { document.querySelector(".demo-card").scrollIntoView({ behavior: "smooth", block: "center" }); document.querySelector("#load-demo").click(); });
 document.querySelector("#load-demo")?.addEventListener("click", async () => {
   const button = document.querySelector("#load-demo"); const status = document.querySelector("#demo-status");
@@ -369,4 +369,8 @@ document.querySelector("#check-answer")?.addEventListener("click", async () => {
 document.querySelector("#reset-progress")?.addEventListener("click", () => {
   mastery = {}; saveMastery(); renderMastery();
 });
+document.querySelectorAll(".nav-link").forEach(link => link.addEventListener("click", () => {
+  document.querySelectorAll(".nav-link").forEach(item => item.classList.remove("active"));
+  link.classList.add("active");
+}));
 renderSources(); renderMastery(); clearAssessment(); refreshServerStatus();
