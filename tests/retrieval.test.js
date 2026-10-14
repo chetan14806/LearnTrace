@@ -53,9 +53,9 @@ assert.notEqual(followUp.id, assessment.id, "A follow-up must be a fresh assessm
 assert.equal(followUp.evidence.locationLabel, assessment.evidence.locationLabel, "A follow-up must stay linked to the original evidence.");
 assert.equal(createAssessment("quantum entanglement", corpus), null, "Unsupported topics must not create an assessment.");
 (async () => {
-  const pdf = require("fs").readFileSync("Problem Statements.pdf");
-  const pdfChunks = await pdfToPageChunks(pdf, "Hackathon problem statements");
+  const pdf = require("./pdf-fixture").samplePdf();
+  const pdfChunks = await pdfToPageChunks(pdf, "Original PDF test fixture");
   assert(pdfChunks.some(chunk => chunk.locationLabel.startsWith("Page 1")), "PDF chunks should retain a page citation.");
-  assert(pdfChunks.some(chunk => /Cardiovascular/i.test(chunk.text)), "PDF extraction should recover page text.");
+  assert(pdfChunks.some(chunk => /resource-allocation graph/i.test(chunk.text)), "PDF extraction should recover page text.");
   console.log("Retrieval, PDF-ingestion, and grounding-contract tests passed.");
 })().catch(error => { console.error(error); process.exit(1); });

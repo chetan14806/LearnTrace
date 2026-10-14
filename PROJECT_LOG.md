@@ -1,5 +1,31 @@
 # Project Log - Multimodal AI Hackathon 2026
 
+## 2026-10-15 — Submission readiness bug fixed
+
+Worked in D:\projects\LearnTrace-submission, the existing Git repository named in the request. Preserved the pre-existing untracked package-lock.json and the current UI.
+
+### Root cause and repair
+
+The submission HTML lacks source-count, file-name and lecture-tools, while app.js expects them. A successful GET /api/status set serverReady true, then updating source-count threw. Its broad catch mislabeled that display error as a backend outage and reset readiness to false. This blocked both playlist and media submission. A regression test against the original actual HTML reproduced the false readiness before the fix.
+
+Readiness now depends on a validated status response. Optional display elements and event controls are guarded; source-library failures cannot reset backend readiness. Actions await a fresh, shared status probe so early submissions and recovery after server startup work. HTTP/JSON/network errors include the route and useful diagnostic; key configuration is distinguished from connectivity. File-name and lecture-tools are also guarded after upload. API keys remain server-side.
+
+### Test portability
+
+The existing retrieval test referenced Problem Statements.pdf, absent from this repository. Replaced that machine-local dependency with an original minimal PDF buffer fixture, still processed by the real PDF extractor. Registered the new frontend regression suite in npm test and documented npm.cmd for PowerShell.
+
+### Actual verification
+
+- Original frontend regression failed on healthy-backend readiness, demonstrating the bug; fixed code passes using the same HTML.
+- Regression coverage includes missing optional panels, status HTTP/JSON/network failures, library failure isolation, retry recovery, early-submit timing, playlist/media dispatch and successful ingestion without optional upload labels.
+- Existing quality and HTTP learner-journey suites pass. Retrieval/PDF suite passes after the self-contained fixture repair.
+- GET /api/status responds from the submission server on port 4173.
+- Fresh generated speech WAV processed through the real HTTP media endpoint: three transcript cues, one topic section, three ingested passages. Retrieval, source-excerpt answering, template quiz creation and grading passed.
+- The verification server has no inherited OpenAI/YouTube credentials from the user's separate terminal, so live model/playlist calls were not marked passed. No attempt was made to read or copy their keys.
+- Browser automation was blocked while accessing the existing connection-error tab. Frontend execution was verified by the regression harness; a new visual browser pass is not claimed.
+
+Launch from the submission directory in the terminal containing the configured keys. Use the port printed by node server.js; another preview port can point to a different copy. No duplicate server was started while a reachable instance existed. A local commit includes only the reviewed repair and tests; no push or history rewrite is part of this fix.
+
 ## Current correction notice — 14 October 2026
 
 Earlier entries contain premature completion claims. REVIEW.md is the current evidence-based status. The user meant using an LLM as an outside reviewer of our work; adding an LLM judge to the code was a misunderstanding. The judge runner, cases, test and package command have now been removed. There is no automatic judge gate.

@@ -42,6 +42,26 @@ The guided demo loads **authored sample text** for a textbook, slides and a time
 
 ## Optional services
 
+### Connection troubleshooting on Windows
+
+Start the server from the submission directory, in the same PowerShell session where you configured the API keys:
+
+```powershell
+Set-Location 'D:\projects\LearnTrace-submission'
+node server.js
+```
+
+In another terminal, check the exact port shown by that server:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:4173/api/status
+npm.cmd test
+```
+
+Open http://127.0.0.1:4173/ and refresh the page after updating frontend files. A different preview port can serve a different project copy. If Node reports EADDRINUSE, reuse the existing server or stop it deliberately in its own terminal; do not start duplicate processes. API environment variables belong to the terminal that launches Node, and changing another terminal does not update a running server.
+
+The October 15 readiness fix prevents optional HTML elements from marking a healthy backend unavailable. If a request fails, the UI now names its route and HTTP/connection error. Missing YouTube configuration is reported separately from backend connectivity.
+
 Set environment variables in the terminal that starts the server. .env files are not automatically loaded.
 
 | Variable | Purpose |
@@ -63,11 +83,12 @@ Live OpenAI and YouTube calls have not been verified during this audit. Stub tes
 ```sh
 node tests/retrieval.test.js
 node tests/quality.test.js
+node tests/frontend.test.js
 node tests/journey.test.js
 node eval/run-retrieval.js
 ```
 
-`npm test` runs the three suites when npm is available. The HTTP journey test starts a temporary loopback server and disables external keys. Quality tests cover stubbed model behavior, failures, repeat-safe grading, follow-up exhaustion, invalid citations, short PPTX slides and unique passage IDs.
+`npm.cmd test` runs all four suites on Windows without invoking PowerShell's blocked npm.ps1. The HTTP journey test starts a temporary loopback server and disables external keys. Quality tests cover stubbed model behavior, failures, repeat-safe grading, follow-up exhaustion, invalid citations, short PPTX slides and unique passage IDs. Frontend tests execute app.js against the actual HTML and cover optional elements, status diagnostics and recovery.
 
 The retrieval script is a small demo smoke check. Its source-level hit rates are **not** a final accuracy metric. A submission-quality evaluation needs independently labelled questions and actual course material, including paraphrases and unsupported questions.
 

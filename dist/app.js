@@ -16,19 +16,49 @@ const gradedIds = new Set();
 let playlistItems = [];
 const selectedPlaylistVideos = new Set();
 
+let statusRequest = null;
+let connectionDiagnostic = "";
 async function refreshServerStatus() {
-  try {
-    const status = await fetch("/api/status").then(response => response.json());
-    serverReady = Boolean(status.retrievalReady);
-    const tutorState = status.modelReady ? `model tutor ready (${status.modelName})` : "evidence-only tutor mode";
-    document.querySelector("#server-status").textContent = `${status.chunks} source passages · ${status.modelReady ? "AI tutor configured" : "Source excerpt mode"}`;
-    document.querySelector("#source-count").textContent = String(status.chunks);
+  if (statusRequest) return statusRequest;
+  statusRequest = (async () => {
+    let status;
+    try {
+      status = await api("/api/status", undefined, { timeoutMs: 8000 });
+      if (!status || typeof status.retrievalReady !== "boolean") throw new Error("GET /api/status returned an unexpected status format.");
+      if (!status.retrievalReady) throw new Error("The backend responded, but retrieval is not ready yet.");
+    } catch (error) {
+      serverReady = false;
+      connectionDiagnostic = error.message;
+      const badge = document.querySelector("#server-status");
+      if (badge) badge.textContent = connectionDiagnostic;
+      return null;
+    }
+    // Backend readiness depends only on its response, never optional display elements.
+    serverReady = true; connectionDiagnostic = "";
+    const badge = document.querySelector("#server-status");
+    if (badge) badge.textContent = `${status.chunks} source passages · ${status.modelReady ? "AI tutor configured" : "Source excerpt mode"}`;
+    const count = document.querySelector("#source-count");
+    if (count) count.textContent = String(status.chunks);
     const message = document.querySelector("#ingest-status");
-    message.textContent = status.chunks ? `${status.chunks} chunks are ready for new questions.` : "Server connected. Add a source to create real evidence chunks.";
-    message.className = "ingest-status ready";
-    if (!playlistItems.length) { const playlistStatus = document.querySelector("#playlist-status"); playlistStatus.textContent = status.playlistReady ? "Server ready. Paste a public playlist URL to map its accessible video metadata." : "Configure the server-side YouTube key to map a public playlist."; playlistStatus.className = "playlist-status"; }
+    if (message) {
+      message.textContent = status.chunks ? `${status.chunks} chunks are ready for new questions.` : "Server connected. Add a source to create real evidence chunks.";
+      message.className = "ingest-status ready";
+    }
+    const playlistStatus = document.querySelector("#playlist-status");
+    if (playlistStatus && !playlistItems.length) {
+      playlistStatus.textContent = status.playlistReady ? "Server ready. Paste a public playlist URL to map its accessible video metadata." : "Backend connected. Playlist mapping needs YOUTUBE_API_KEY in the server terminal.";
+      playlistStatus.className = "playlist-status";
+    }
     await refreshSourceLibrary();
-  } catch { serverReady = false; document.querySelector("#server-status").textContent = "Server unavailable · open LearnTrace through node server.js"; }
+    return status;
+  })();
+  try { return await statusRequest; }
+  finally { statusRequest = null; }
+}
+async function ensureServerReady() {
+  const status = await refreshServerStatus();
+  if (!status) throw new Error(connectionDiagnostic || "Backend status could not be checked.");
+  return status;
 }
 function showLiveAnswer(result) {
   document.querySelector("#answer-mode-label").textContent = result.mode === "model_grounded" ? "MODEL-GROUNDED ANSWER" : "EVIDENCE-ONLY ANSWER";
@@ -45,10 +75,10 @@ function showLiveAnswer(result) {
 }
 
 function renderSources(liveSources = null) {
-  const grid = document.querySelector("#source-grid"); grid.innerHTML = "";
+  const grid = document.querySelector("#source-grid"); if (!grid) return; grid.innerHTML = "";
   const summary = document.querySelector("#source-summary");
   if (liveSources && liveSources.length) {
-    summary.textContent = `${liveSources.length} real source${liveSources.length === 1 ? "" : "s"} in this study space`;
+    if (summary) summary.textContent = `${liveSources.length} real source${liveSources.length === 1 ? "" : "s"} in this study space`;
     liveSources.forEach(source => {
       const card = document.createElement("article"); const type = document.createElement("span"); type.className = "source-type"; type.textContent = source.type.toUpperCase();
       const title = document.createElement("h3"); title.textContent = source.title;
@@ -58,17 +88,17 @@ function renderSources(liveSources = null) {
     });
     return;
   }
-  summary.textContent = "No sources yet";
+  if (summary) summary.textContent = "No sources yet";
   const empty = document.createElement("p"); empty.textContent = "Add your material or load the labelled demo to begin."; grid.append(empty);
 }
 async function refreshSourceLibrary() {
   if (!serverReady) return;
   try {
-    const result = await fetch("/api/sources").then(response => response.json()); renderSources(result.sources);
-    if (result.sources.length >= 2 && document.querySelector("#concept-list").classList.contains("hidden")) {
+    const result = await api("/api/sources"); renderSources(result.sources);
+    if (result.sources.length >= 2 && document.querySelector("#concept-list")?.classList.contains("hidden")) {
       const status = document.querySelector("#concept-map-status"); status.textContent = "Two or more sources are ready. Build the concept map to reveal shared evidence."; status.className = "concept-map-status";
     }
-  } catch { /* The library keeps its local demo state if the server is unavailable. */ }
+  } catch (error) { const summary = document.querySelector("#source-summary"); if (summary) summary.textContent = `Source library: ${error.message}`; }
 }
 function renderConceptMap(concepts) {
   const list = document.querySelector("#concept-list"); list.innerHTML = "";
@@ -95,7 +125,7 @@ function renderConceptMap(concepts) {
 }
 async function loadConceptMap() {
   const status = document.querySelector("#concept-map-status");
-  if (!serverReady) { status.textContent = "Open LearnTrace through its local server before building a concept map."; status.className = "concept-map-status error"; return; }
+  try { await ensureServerReady(); } catch (error) { status.textContent = error.message; status.className = "concept-map-status error"; return; }
   status.textContent = "Finding shared terms across your ingested evidence…"; status.className = "concept-map-status";
   try {
     const response = await fetch("/api/concept-map"); const result = await response.json(); if (!response.ok) throw new Error(result.error);
@@ -105,8 +135,8 @@ async function loadConceptMap() {
 }
 function renderMastery() {
   const items = Object.entries(mastery);
-  const list = document.querySelector("#mastery-list"); list.replaceChildren();
-  document.querySelector("#overall-score").textContent = items.length ? `${items.length} study topics` : "No checks yet";
+  const list = document.querySelector("#mastery-list"); if (!list) return; list.replaceChildren();
+  const overall = document.querySelector("#overall-score"); if (overall) overall.textContent = items.length ? `${items.length} study topics` : "No checks yet";
   if (!items.length) { const empty = document.createElement("p"); empty.textContent = "Your practice history starts here. Complete a source check to see what to revisit."; list.append(empty); return; }
   items.sort((a, b) => a[1].correct / a[1].attempts - b[1].correct / b[1].attempts).forEach(([name, record]) => {
     const row = document.createElement("div"); row.className = "practice-row";
@@ -118,6 +148,7 @@ function renderMastery() {
 }
 function clearAssessment(message = "Ask about your sources to prepare a check.") {
   activeAssessment = null; activeStudyPath = null; selected = null;
+  if (!document.querySelector("#check-answer") || !document.querySelector("#quiz-question") || !document.querySelector("#quiz-concept") || !document.querySelector("#feedback") || !document.querySelector("#next-title") || !document.querySelector("#next-copy") || !document.querySelector("#next-evidence") || !document.querySelector("#start-check")) return;
   renderOptions([]); document.querySelector("#check-answer").disabled = true;
   document.querySelector("#quiz-question").textContent = message;
   document.querySelector("#quiz-concept").textContent = "Source check";
@@ -128,7 +159,7 @@ function clearAssessment(message = "Ask about your sources to prepare a check.")
   document.querySelector("#start-check").disabled = true;
 }
 function renderOptions(values = []) {
-  const list = document.querySelector("#options"); list.replaceChildren();
+  const list = document.querySelector("#options"); if (!list) return; list.replaceChildren();
   values.forEach((value, index) => { const button = document.createElement("button"); button.className = "option"; button.dataset.index = String(index); button.textContent = `${String.fromCharCode(65 + index)}. ${value}`; list.append(button); });
   document.querySelectorAll(".option").forEach(button => button.addEventListener("click", () => { document.querySelectorAll(".option").forEach(b => b.classList.remove("selected")); button.classList.add("selected"); selected = Number(button.dataset.index); }));
 }
@@ -169,7 +200,7 @@ function renderPlaylistItems() {
   const visibleItems = playlistItems.filter(item => !query || `${item.title} ${item.description} ${item.topics.join(" ")}`.toLowerCase().includes(query));
   visibleItems.forEach(item => {
     const card = document.createElement("article"); card.className = `playlist-item${item.available ? "" : " unavailable"}`;
-    if (item.available) { const box = document.createElement("input"); box.type = "checkbox"; box.checked = selectedPlaylistVideos.has(item.videoId); box.setAttribute("aria-label", `Select ${item.title}`); box.addEventListener("change", () => { if (box.checked) { selectedPlaylistVideos.add(item.videoId); [document.querySelector("#media-title"), document.querySelector("#transcript-title")].forEach(title => { if (!title.value) title.value = item.title; }); } else selectedPlaylistVideos.delete(item.videoId); updatePlaylistSelection(); }); card.append(box); }
+    if (item.available) { const box = document.createElement("input"); box.type = "checkbox"; box.checked = selectedPlaylistVideos.has(item.videoId); box.setAttribute("aria-label", `Select ${item.title}`); box.addEventListener("change", () => { if (box.checked) { selectedPlaylistVideos.add(item.videoId); [document.querySelector("#media-title"), document.querySelector("#transcript-title")].forEach(title => { if (title && !title.value) title.value = item.title; }); } else selectedPlaylistVideos.delete(item.videoId); updatePlaylistSelection(); }); card.append(box); }
     const content = document.createElement("div"); const title = document.createElement("h3"); title.textContent = `${item.position}. ${item.title}`; const description = document.createElement("p"); description.textContent = item.description; content.append(title, description);
     item.topics.forEach(topic => { const tag = document.createElement("span"); tag.className = "topic-tag"; tag.textContent = topic; content.append(tag); });
     const evidence = document.createElement("small"); evidence.textContent = item.available ? item.evidenceLabel : "Unavailable item — no selectable public video link"; content.append(evidence);
@@ -179,12 +210,12 @@ function renderPlaylistItems() {
   if (!visibleItems.length) { const empty = document.createElement("p"); empty.textContent = "No mapped lecture matches that filter."; list.append(empty); }
   updatePlaylistSelection();
 }
-document.querySelector("#playlist-filter").addEventListener("input", renderPlaylistItems);
-document.querySelector("#playlist-form").addEventListener("submit", async event => {
+document.querySelector("#playlist-filter")?.addEventListener("input", renderPlaylistItems);
+document.querySelector("#playlist-form")?.addEventListener("submit", async event => {
   event.preventDefault(); const status = document.querySelector("#playlist-status"); const url = document.querySelector("#playlist-url").value.trim();
-  if (!serverReady) { status.textContent = "Open LearnTrace through node server.js before mapping a playlist."; status.className = "playlist-status error"; return; }
+  try { const readiness = await ensureServerReady(); if (!readiness.playlistReady) throw new Error("Backend connected, but playlist mapping needs YOUTUBE_API_KEY in the terminal running this server."); } catch (error) { status.textContent = error.message; status.className = "playlist-status error"; return; }
   status.textContent = "Mapping public playlist metadata…"; status.className = "playlist-status";
-  try { const response = await fetch("/api/playlist", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) }); const result = await response.json(); if (!response.ok) throw new Error(result.error); playlistItems = result.items; selectedPlaylistVideos.clear(); document.querySelector("#playlist-results").classList.remove("hidden"); renderPlaylistItems(); status.textContent = `${playlistItems.length} playlist items mapped. Select the lectures you want to study.`; status.className = "playlist-status ready"; }
+  try { const result = await api("/api/playlist", { url }); playlistItems = result.items; selectedPlaylistVideos.clear(); document.querySelector("#playlist-results").classList.remove("hidden"); renderPlaylistItems(); status.textContent = `${playlistItems.length} playlist items mapped. Select the lectures you want to study.`; status.className = "playlist-status ready"; }
   catch (error) { status.textContent = error.message; status.className = "playlist-status error"; }
 });
 function startMediaProgress(status, targetName = "lecture", statusClass = "transcript-status") {
@@ -202,31 +233,44 @@ function renderTranscriptTopics(topics, target) {
   const list = document.querySelector(target); list.innerHTML = "";
   topics.forEach(topic => { const card = document.createElement("article"); card.className = "transcript-topic"; const title = document.createElement("h3"); title.textContent = `${topic.section}. ${topic.topicLabel}`; const time = document.createElement("small"); time.textContent = `${topic.start} – ${topic.end} · transcript terms: ${topic.terms.join(", ")}`; const evidence = document.createElement("p"); evidence.textContent = `“${topic.evidence}”`; card.append(title, time, evidence); list.append(card); });
 }
-document.querySelector("#transcript-form").addEventListener("submit", async event => {
+document.querySelector("#transcript-form")?.addEventListener("submit", async event => {
   event.preventDefault(); const status = document.querySelector("#transcript-status"); const file = document.querySelector("#transcript-file").files[0]; const content = file ? await file.text() : document.querySelector("#transcript-text").value; const title = document.querySelector("#transcript-title").value || (file ? file.name : "Untitled lecture transcript");
-  if (!serverReady) { status.textContent = "Open LearnTrace through node server.js before mapping a transcript."; status.className = "transcript-status error"; return; }
+  try { await ensureServerReady(); } catch (error) { status.textContent = error.message; status.className = "transcript-status error"; return; }
   if (!content.trim()) { status.textContent = "Attach or paste timed SRT/VTT captions first."; status.className = "transcript-status error"; return; }
   status.textContent = "Finding timestamped topic candidates from the transcript…"; status.className = "transcript-status";
-  try { const response = await fetch("/api/transcript-topic-map", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, content }) }); const result = await response.json(); if (!response.ok) throw new Error(result.error); renderTranscriptTopics(result.topics, "#transcript-topic-list"); document.querySelector("#transcript-results").classList.remove("hidden"); status.textContent = `${result.topics.length} transcript-grounded topic sections mapped; ${result.added} timestamped chunks are now available for questions.`; status.className = "transcript-status ready"; document.querySelector("#transcript-text").value = ""; document.querySelector("#transcript-file").value = ""; refreshServerStatus(); }
+  try { const result = await api("/api/transcript-topic-map", { title, content }); renderTranscriptTopics(result.topics, "#transcript-topic-list"); document.querySelector("#transcript-results").classList.remove("hidden"); status.textContent = `${result.topics.length} transcript-grounded topic sections mapped; ${result.added} timestamped chunks are now available for questions.`; status.className = "transcript-status ready"; document.querySelector("#transcript-text").value = ""; document.querySelector("#transcript-file").value = ""; refreshServerStatus(); }
   catch (error) { status.textContent = error.message; status.className = "transcript-status error"; }
 });
 function bytesToBase64(bytes) { let binary = ""; const size = 8192; for (let index = 0; index < bytes.length; index += size) binary += String.fromCharCode(...bytes.subarray(index, index + size)); return btoa(binary); }
-document.querySelector("#media-form").addEventListener("submit", async event => {
-  event.preventDefault(); const file = document.querySelector("#media-file").files[0]; const status = document.querySelector("#media-status"); if (!serverReady) { status.textContent = "Open LearnTrace through node server.js before transcribing media."; status.className = "transcript-status error"; return; }
+document.querySelector("#media-form")?.addEventListener("submit", async event => {
+  event.preventDefault(); const file = document.querySelector("#media-file").files[0]; const status = document.querySelector("#media-status"); try { await ensureServerReady(); } catch (error) { status.textContent = error.message; status.className = "transcript-status error"; return; }
   if (!file) { status.textContent = "Choose a lecture audio or video file first."; status.className = "transcript-status error"; return; }
   if (file.size > 100_000_000) { status.textContent = "Choose media smaller than 100 MB for this local demo."; status.className = "transcript-status error"; return; }
   const title = document.querySelector("#media-title").value || file.name; const finishProgress = startMediaProgress(status, "lecture audio or video");
-  try { const bytes = new Uint8Array(await file.arrayBuffer()); const response = await fetch("/api/transcribe-media", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, filename: file.name, base64: bytesToBase64(bytes) }) }); const result = await response.json(); if (!response.ok) throw new Error(result.error); finishProgress(); renderTranscriptTopics(result.topics, "#media-topic-list"); document.querySelector("#media-results").classList.remove("hidden"); status.textContent = `${result.transcript.length} timed transcript cues and ${result.topics.length} topic sections created locally with ${result.model}. Inspect the evidence text before relying on it.`; status.className = "transcript-status ready"; document.querySelector("#media-file").value = ""; refreshServerStatus(); }
+  try { const bytes = new Uint8Array(await file.arrayBuffer()); const result = await api("/api/transcribe-media", { title, filename: file.name, base64: bytesToBase64(bytes) }); finishProgress(); renderTranscriptTopics(result.topics, "#media-topic-list"); document.querySelector("#media-results").classList.remove("hidden"); status.textContent = `${result.transcript.length} timed transcript cues and ${result.topics.length} topic sections created locally with ${result.model}. Inspect the evidence text before relying on it.`; status.className = "transcript-status ready"; document.querySelector("#media-file").value = ""; refreshServerStatus(); }
   catch (error) { finishProgress(); status.textContent = friendlyMediaError(error); status.className = "transcript-status error"; }
 });
-async function api(route, body) {
-  const response = await fetch(route, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+async function api(route, body, { timeoutMs } = {}) {
+  const method = body === undefined ? "GET" : "POST";
+  if (location.protocol === "file:") throw new Error("Open http://127.0.0.1:4173/ from the running server instead of opening index.html directly.");
+  let response;
+  try {
+    response = await fetch(route, {
+      method, cache: "no-store",
+      ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+      ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {})
+    });
+  } catch (error) {
+    const reason = /Timeout|Abort/.test(error.name) ? "timed out" : "could not connect";
+    throw new Error(`${method} ${route} ${reason} at ${location.origin}. Check that this page uses the port of the running server, then retry.`);
+  }
   let result;
-  try { result = await response.json(); } catch { throw new Error("The local server did not return a readable response. Check that it is running."); }
-  if (!response.ok) throw new Error(result.error || "The request could not be completed.");
+  try { result = await response.json(); }
+  catch { throw new Error(`${method} ${route} returned HTTP ${response.status} without valid JSON. Check that this port serves LearnTrace's Node backend.`); }
+  if (!response.ok) throw new Error(`${method} ${route} failed (HTTP ${response.status}): ${result?.error || "Request failed."}`);
   return result;
 }
-document.querySelector("#question-form").addEventListener("submit", async event => {
+document.querySelector("#question-form")?.addEventListener("submit", async event => {
   event.preventDefault();
   const question = document.querySelector("#question").value.trim(); if (!question) return;
   const button = event.currentTarget.querySelector("button"); if (button.disabled) return;
@@ -234,7 +278,7 @@ document.querySelector("#question-form").addEventListener("submit", async event 
   button.disabled = true; button.textContent = "Finding evidence…"; status.textContent = "";
   clearAssessment();
   try {
-    if (!serverReady) throw new Error("The local server is unavailable. Start LearnTrace and refresh this page.");
+    await ensureServerReady();
     const result = await api("/api/ask", { question }); showLiveAnswer(result);
     if (result.evidence.length && result.mode !== "insufficient_evidence") await loadSourceCheck(question);
   } catch (error) { status.textContent = error.message; }
@@ -244,13 +288,13 @@ document.querySelectorAll(".suggestions button").forEach(button => button.addEve
   document.querySelector("#question").value = button.dataset.question;
   document.querySelector("#question-form").requestSubmit();
 }));
-document.querySelector("#start-check").addEventListener("click", loadFollowUpCheck);
-document.querySelector("#refresh-concept-map").addEventListener("click", loadConceptMap);
-document.querySelector("#start-own").addEventListener("click", () => { document.querySelector("#ingest").scrollIntoView({ behavior: "smooth", block: "start" }); window.setTimeout(() => document.querySelector("#source-title").focus(), 350); });
-document.querySelector("#start-demo").addEventListener("click", () => { document.querySelector(".demo-card").scrollIntoView({ behavior: "smooth", block: "center" }); document.querySelector("#load-demo").click(); });
-document.querySelector("#load-demo").addEventListener("click", async () => {
+document.querySelector("#start-check")?.addEventListener("click", loadFollowUpCheck);
+document.querySelector("#refresh-concept-map")?.addEventListener("click", loadConceptMap);
+document.querySelector("#start-own")?.addEventListener("click", () => { document.querySelector("#ingest").scrollIntoView({ behavior: "smooth", block: "start" }); window.setTimeout(() => document.querySelector("#source-title").focus(), 350); });
+document.querySelector("#start-demo")?.addEventListener("click", () => { document.querySelector(".demo-card").scrollIntoView({ behavior: "smooth", block: "center" }); document.querySelector("#load-demo").click(); });
+document.querySelector("#load-demo")?.addEventListener("click", async () => {
   const button = document.querySelector("#load-demo"); const status = document.querySelector("#demo-status");
-  if (!serverReady) { status.textContent = "Open LearnTrace through its local server to load the guided demo."; return; }
+  try { await ensureServerReady(); } catch (error) { status.textContent = error.message; return; }
   button.disabled = true; button.textContent = "Loading evidence…"; status.textContent = "Adding clearly labelled sample sources…";
   try {
     const response = await fetch("/api/demo", { method: "POST" }); const result = await response.json(); if (!response.ok) throw new Error(result.error);
@@ -259,12 +303,12 @@ document.querySelector("#load-demo").addEventListener("click", async () => {
     button.textContent = "Demo ready"; button.disabled = false; document.querySelector("#concept-map").scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) { status.textContent = error.message; button.textContent = "Try guided demo again"; button.disabled = false; }
 });
-document.querySelector("#ingest-form").addEventListener("submit", async event => {
+document.querySelector("#ingest-form")?.addEventListener("submit", async event => {
   event.preventDefault(); const button = event.currentTarget.querySelector("button");
   if (button.disabled) return; button.disabled = true;
   const status = document.querySelector("#ingest-status");
   try {
-    if (!serverReady) throw new Error("Start the local server before adding material.");
+    await ensureServerReady();
     const file = document.querySelector("#source-file").files[0];
     const title = document.querySelector("#source-title").value.trim() || file?.name || "Pasted source";
     const extension = file?.name.split(".").pop().toLowerCase();
@@ -287,18 +331,18 @@ document.querySelector("#ingest-form").addEventListener("submit", async event =>
     if (result.topics) {
       renderTranscriptTopics(result.topics, "#media-topic-list");
       document.querySelector("#media-results").classList.remove("hidden");
-      document.querySelector("#lecture-tools").open = true;
+      const tools = document.querySelector("#lecture-tools"); if (tools) tools.open = true;
     }
     status.textContent = `Added “${title}”: ${result.added} source passages ready. Ask a question below.`; status.className = "ingest-status ready";
     document.querySelector("#source-file").value = ""; document.querySelector("#source-text").value = "";
-    document.querySelector("#file-name").textContent = "No file selected";
+    const filename = document.querySelector("#file-name"); if (filename) filename.textContent = "No file selected";
   } catch (error) { status.textContent = error.message; status.className = "ingest-status error"; }
   finally { button.disabled = false; }
 });
-document.querySelector("#source-file").addEventListener("change", event => {
-  document.querySelector("#file-name").textContent = event.target.files[0]?.name || "No file selected";
+document.querySelector("#source-file")?.addEventListener("change", event => {
+  const filename = document.querySelector("#file-name"); if (filename) filename.textContent = event.target.files[0]?.name || "No file selected";
 });
-document.querySelector("#check-answer").addEventListener("click", async () => {
+document.querySelector("#check-answer")?.addEventListener("click", async () => {
   const feedback = document.querySelector("#feedback");
   if (!activeAssessment || selected === null) { feedback.textContent = "Choose an answer to the current source check."; feedback.classList.remove("hidden"); return; }
   const button = document.querySelector("#check-answer"); if (button.disabled) return;
@@ -322,7 +366,7 @@ document.querySelector("#check-answer").addEventListener("click", async () => {
     button.textContent = "Result saved"; renderMastery();
   } catch (error) { feedback.textContent = error.message; feedback.classList.remove("hidden"); button.disabled = false; }
 });
-document.querySelector("#reset-progress").addEventListener("click", () => {
+document.querySelector("#reset-progress")?.addEventListener("click", () => {
   mastery = {}; saveMastery(); renderMastery();
 });
 renderSources(); renderMastery(); clearAssessment(); refreshServerStatus();
