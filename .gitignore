@@ -6,3 +6,6 @@ __pycache__/
 .venv/
 .env.*
 !.env.example
+
+# Local presentation notes are not submission source.
+/DEMO_SPEECH.md
