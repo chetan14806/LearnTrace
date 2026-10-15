@@ -130,6 +130,8 @@ The retrieval script is a small demo smoke check. Its source-level hit rates are
 - Template quizzes check source reading, with simple distractors. The revision loop is not a validated mastery model or long-term adaptive curriculum.
 - The original uploaded files are not retained for playback/viewing. Citations show extracted passages.
 
+## AI assistance disclosure: 
+I used OpenAI Codex extensively as a development assistant for planning, writing and revising code, creating tests, documentation, and drafting submission/demo text. I directed the project, made scope decisions, tested the application,debugged, features addition and correction. and recorded the demonstration. LearnTrace also optionally uses the OpenAI API for tutoring and quiz generation, and faster-whisper for local transcription.
 ## Project guide
 
 [GITHUB_GUIDE.md](GITHUB_GUIDE.md): exact file layout, exclusions and safe updates after merging a GitHub-created README/.gitignore. Publishing source does not deploy this Node/Python application.
