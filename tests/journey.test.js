@@ -53,7 +53,8 @@ async function request(baseUrl, path, method = "GET", body) {
     const answer = await request(baseUrl, "/api/ask", "POST", { question: "How does a graph indicate deadlock?", sourceIds });
     assert(answer.evidence.length > 0, "The tutor must retrieve real evidence before answering.");
 
-    const assessment = await request(baseUrl, "/api/assessment", "POST", { focus: "deadlock resource allocation graph", sourceIds });
+    assert.equal(answer.practiceEligible, false, "Retrieval-only mode must not automatically start a quiz.");
+    const assessment = await request(baseUrl, "/api/assessment", "POST", { focus: "deadlock resource allocation graph", practiceMode: "source_reading", chunkId: answer.evidence[0].id, sourceIds });
     assert.equal(assessment.options.length, 4, "A concept should create a four-option source check.");
     const grade = await request(baseUrl, "/api/assessment/grade", "POST", { id: assessment.id, selectedIndex: 0, sourceIds });
     assert(grade.studyPath.assessmentId, "Grading should produce an adaptive follow-up path.");

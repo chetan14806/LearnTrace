@@ -1,5 +1,89 @@
 # Project Log - Multimodal AI Hackathon 2026
 
+## 2026-10-15 — Prepared a history-preserving GitHub push folder
+
+At the user's request, created D:\projects\Multimodal AI hackathon\LearnTrace-GitHub-Ready as a local clone of the existing submission history, then copied the latest reviewed source, frontend, tests/fixtures, retrieval smoke check and documentation using an explicit allowlist. Origin points to the existing github.com/chetan14806/LearnTrace repository; embedded HTTP credentials/query parameters are not carried into the new origin URL. The branch remains main. Existing README/.gitignore history is preserved; .gitignore was not replaced with new rules.
+
+No environment files, keys, virtual environment, node_modules, caches, private study materials or scratch audit scripts were copied. Local Git history was retained, not audited for historical secret exposure. Created PUSH_COMMANDS.md with exact review/stage/commit/fetch/fast-forward-only pull/push steps and instructions to stop on divergence rather than force-push. The source still runs from the original workspace; packaging did not restart or clear the demo server. The new directory is a snapshot, so any later fix must be deliberately copied before pushing.
+
+All seven regression suites passed from the packaged folder on this machine. This is not a clean-machine installation or live-service verification. No commit, network fetch, GitHub push, visibility change or deployment was performed. The user must review the staged content and complete authentication/push themselves using the provided commands.
+
+## 2026-10-15 — Step 1 repair: latest learner action owns the UI
+
+At the user's request to solve the audit one step at a time, changed only the stale answer/quiz interaction defect and its tests/documentation. Follow-up completion/replay enforcement, persistent storage, answer correctness, learner modeling and the other audit items are separate, unfinished steps. No LLM judge or extra model call was introduced.
+
+### Root cause and teaching note
+
+scopeVersion answers “am I still studying the same sources?” It did not answer “is this response for the learner's latest action?” While quiz A was pending, question B could return an answer, but assessmentLoading blocked B's quiz. A's late response could then display beside B's answer. Late errors and finally callbacks could also change a newer action's controls.
+
+Added a monotonic studyAction identity. A new question, explicit passage/concept check, follow-up or source selection invalidates prior work. Automatic quiz generation inherits its question's identity. Answer/check/follow-up success and error callbacks must match the current action and source scope before changing the page; grading also checks the active assessment. An old completion cannot release a newer loading state or unlock its submit button. Direct practice callers only scroll when their result/error still belongs to the current action. Question submission is available again once the answer arrives, without waiting for background quiz generation. This is response isolation, not cancellation: obsolete network/model work can still finish on the server, but cannot mutate the latest learner UI.
+
+### Regression proof
+
+First ran the new delayed-response regression against the old frontend: it failed with “New quiz B was blocked by old quiz A.” After the fix, the expanded suite passes old quiz success/failure while B loads; old answer success/failure after explicit practice; old follow-up success/failure after a new question; source changes during an answer; obsolete finally callbacks while another question remains pending; and an obsolete grading error. Assertions inspect the displayed answer, quiz, active assessment, loading flags and controls—not just request payloads.
+
+The fake-DOM harness now supplies dataset, stable form-button nodes and actual rendered option lists. Added checks that a successful quiz is active, renders four options and enables Check answer. This closes the earlier rendering blind spot rather than merely suppressing an exception.
+
+All seven suites pass in the submission. An isolated keyless real-browser smoke check verified sample loading, question/evidence display, explicit reading check, correct grading, practice count and follow-up generation. The race itself is verified with deterministic delayed responses, not claimed as a live-model timing experiment. Saved a smoke screenshot. The user's main server, keys and uploads were not restarted/cleared. This repair is frontend-only and loads on refresh; prior pending backend upgrades still require their own deliberate restart. No GitHub push or unrelated repair was performed.
+
+## 2026-10-15 — Fresh end-to-end review against the complete Track D brief
+
+Created END_TO_END_AUDIT.md after reading the local overview/submission PDFs and all three pages of the detailed Track D document linked from the overview. This materially corrects earlier scope advice: the full brief explicitly requires figure/diagram use, original-source navigation, broader assessments, a learner model, standard-framework RAG evaluation and simulated multi-session results. The overview alone did not expose these gaps. Personalization (20%) and system evaluation (15%) together are 35% of the stated rubric. This is not a predicted score or prize guarantee.
+
+Fresh verification: all seven existing suites passed. A real PDF upload and an in-memory generated standard PPTX returned 201 with page/slide locations. A fresh synthetic spoken 12.48-second WAV passed the actual local media HTTP route in about 12.749 seconds with three timed cues and one topic section. This proves one local pipeline run, not noisy lecture accuracy or a performance benchmark. Browser verification completed sample loading, related-evidence display, explicit practice, a wrong answer, cited revision, a correct follow-up and 1/2 attempt history preserved across reload. No paid model/YouTube calls or live user's corpus were used.
+
+Adversarial probes confirmed that false model answers and quiz keys with real quotes can still pass; paraphrases can miss; unpunctuated 9,000-character text bypasses chunk targets; invalid/reversed captions are accepted; topic labels can refer to terms omitted from truncated evidence; ungraded/replayed follow-ups create children; malformed JSON returns 500; and corrupt PDFs expose raw Python diagnostics. These injected false outputs demonstrate missing validation, not an observed live-model hallucination rate.
+
+A delayed-response simulation reproduced Question B's answer paired with Question A's old quiz in the same source scope. The fake-DOM test harness lacks dataset on created options and does not assert successful quiz display; the audit harness added that browser-like property to expose the actual request-identity failure. Keyboard source selection lost focus to BODY. Reload falsely claimed no sample was loaded. A requested 390px browser override still reported 1280px; it was reset, and a fresh mobile pass is not claimed.
+
+The report separates original-goal alignment, verified workflows, limitations, concrete defects, rubric priorities and acceptance checks. Its plan prioritizes real learner state and storage, correctness/novelty, source viewers, visual extraction and measured external evaluation. No LLM judge is in or proposed for the runtime product. The PDF skill was used to verify the original requirements instead of relying only on our summary; this changed the audit's priority order materially.
+
+This was an audit, not a repair request: application code, README, .gitignore, package-lock, keys and the user's main server were left unchanged. Only the report and this log entry were added to the submission folder. Latest code/docs/tests remain uncommitted; no GitHub push, publication or external submission was performed. Remote GitHub contents, clean-machine setup, live service quality and the competition deadline remain unverified.
+
+## 2026-10-15 — Focused quizzes and GitHub packaging guide
+
+### Scope and teaching note
+
+Continued with LT-06 and some LT-05 guardrails, without an LLM judge. Previously the model received a passage but not the original learner focus; the fallback chose its first unused sentence. A graph-cycle question could become a deadlock-definition check. The original focus is now passed as quoted JSON data and stored for follow-ups. Template sentences are BM25-ranked and restricted to strongest matched-term coverage. Exhaustion returns an actionable 422 rather than drifting to weaker statements or returning an internal 500.
+
+Generated quiz responses now include supportQuote. Code checks quote occurrence/length, lexical relevance and normalized distinct options. These are necessary guards, NOT independent semantic validation. A false statement about the right topic with a real quote can still pass; LT-05 remains open for reviewed evaluation. Feedback now describes the AI-generated answer key and exposes the quote. Generic misconception text is a general note, not a diagnosis of a specific selected distractor. No second judging request or internal judge was added. The OpenAI Docs skill informed the schema field in the same existing generation call; no model change or paid service test was performed.
+
+### Verification
+
+Seven suites pass: retrieval/PDF, quality, quiz-focus, frontend, answerability, source-scope HTTP and learner journey. New regressions verify focused graph-cycle selection instead of an opening definition, original intent in initial/follow-up request bodies, rejection of missing/invented quotes and obvious off-topic stubs, normalized duplicate options, source-quote feedback and one generation call rather than a judge. Retrieval follow-up expectations were deliberately tightened to report exhaustion after the only strongest statement is used. The source-isolation fixture gained a second equally focused graph statement so it still exercises successful scoped follow-up; quality tests separately retain variety coverage. Stub tests are not measured live-model accuracy.
+
+### Repository guidance
+
+Created GITHUB_GUIDE.md: exact current tree, required runtime/dist/tests/fixtures, optional authored retrieval eval, documentation, exclusions and reviewed PowerShell staging/commit/sync/push instructions. The user already integrated their GitHub README and .gitignore: no reinitialization or unrelated-history merge is needed. Preserved .gitignore unchanged and the existing README content apart from refinement notes. Inspected but did not modify package-lock.json; it matches the Node package and is suitable to include. No fetch, merge, push, publication, license decision or deployment was performed. The live server, keys and in-memory sources remain untouched; backend activation requires a deliberate restart and refresh.
+
+## 2026-10-15 — Scope clarification and answer/related-material boundary
+
+**Current scope: no LLM judge in the product.** The user clarified again that their earlier request meant an external review of LearnTrace's code, outputs and website. That can be useful before submission alongside automated tests and human review, but is not a learner feature. The old historical judge-design notes later in this log are superseded; the runtime judge, cases, tests and package command had already been removed. Verified the installed server/frontend/eval/package contain no runtime judge. No judge was reintroduced here.
+
+### Implementation and teaching note
+
+Retrieval asks “which passages share useful words?” Answering asks “can these passages support the requested information?” Those are different jobs. The current BM25 retriever remains lexical. Without AI, matches now appear as related passages, not an answer, and never silently trigger a quiz. No matches is described as a retrieval outcome, not proof that an answer cannot exist in the full source.
+
+The existing tutor call (one response, not a second judging call) returns either an answer with support quotes or an insufficient-evidence outcome. Application code checks the response shape, quote occurrence and numbered references. Missing/invalid output, refusal or service failure shows only related material. This follows official OpenAI structured-response formatting, which constrains shape—not truth. It does not independently verify answerability or semantic entailment. The tutor can still be wrong; LT-02 is guarded, not universally solved, and LT-04/05/27 remain open.
+
+Server-owned, bounded in-memory answer receipts allow automatic quiz generation only for a tutor response that passed that contract, with the original question and source set. An unanswered question cannot bypass this by submitting a client-side eligibility flag. Explicit “Practise this passage” and concept-card reading checks still work without a model: they exercise the displayed passage rather than implying the original question was answered. These are deterministic reading checks; their follow-ups and grading remain the existing workflow. All source data and receipts still clear on restart.
+
+### Verification and limitations
+
+All six suites passed in an isolated build: retrieval/PDF, quality, frontend, answerability, source-scope HTTP and learner journey. New tests cover date/person/comparison/cause/compound-question lexical matches without automatic practice; tutor insufficient responses; malformed JSON; invalid/missing citations and quotes; service/timeout/rate-limit fallback; server receipt enforcement; explicit reading; and a supported automatic path with an injected response. One test asserts exactly one tutor request, with no second judge call. Semantic negative-response tests use stubs and do NOT measure a real model's refusal accuracy.
+
+Real-browser check in a separate keyless server: sample sources + “What year was deadlock invented?” produced related passages and no automatic quiz; explicit passage practice generated a reading question and graded correctly. The main server, user's uploaded sources, keys and browser history were not cleared. README, architecture and demo speech were updated to distinguish the new routes. Activation still requires a deliberate backend restart and refresh, with in-memory uploads re-added.
+
+## 2026-10-15 — Practice button verification and demo speech
+
+Inspected the user's existing browser tab without submitting questions or changing its corpus. It had 53 passages and four sources, but no active assessment. The tab still displayed the pre-source-selection frontend. This establishes that the inactive quiz was not simply an empty-library problem: Check answer is disabled until an assessment is prepared; the next-step card stays disabled until grading. Having uploaded sources alone does not create a check.
+
+Started a separate temporary loopback server from the submission folder, with OpenAI and YouTube keys disabled. In a real browser: loaded the authored sample module; asked the resource-graph question; observed a source-reading check; selected a known wrong option; graded it; verified cited revision feedback and 0/1 practice; clicked Try a follow-up; observed a different lecture passage; answered correctly; verified 1/2 practice. Also expanded a concept and clicked Start source check to verify the direct concept-to-practice route. These results verify UI wiring and the deterministic workflow, not live model generation or quiz semantic correctness. The user's main server and uploads were not modified or restarted.
+
+Usability findings remain: the disabled initial next-step action sounds like a start button; old follow-up button text can remain after starting another check. No application code was changed in this diagnosis. Recommended next UI work is explicit prerequisites and a clear direct practice entry, alongside the existing answerability audit priority.
+
+Created DEMO_SPEECH.md with a screen-by-screen 6–7 minute talk, setup and rehearsal checklist, mode-dependent wording, practice troubleshooting, judge Q&A and prohibited overclaims. It distinguishes real extraction from authored samples, lexical retrieval from semantic answerability, transcript-derived topic candidates from exhaustive video understanding, and playlist metadata from automatic video transcription. It documents in-memory source loss on restart and the current open reliability items.
+
 ## 2026-10-15 — LT-01 implemented: select the material you are studying
 
 ### What changed

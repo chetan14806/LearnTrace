@@ -13,6 +13,17 @@ let activeAssessment = null;
 let activeStudyPath = null;
 let assessmentLoading = false;
 let assessmentRequest = 0;
+let studyAction = 0;
+// Only the latest learner action owns the answer, check and revision UI.
+function beginStudyAction() {
+  studyAction += 1;
+  assessmentRequest += 1;
+  assessmentLoading = false;
+  const button = document.querySelector('#question-form')?.querySelector('button');
+  if (button) { button.disabled = false; button.textContent = 'Find evidence ↗'; }
+  return studyAction;
+}
+function isCurrentStudyAction(action, version) { return action === studyAction && version === scopeVersion; }
 const gradedIds = new Set();
 let playlistItems = [];
 const selectedPlaylistVideos = new Set();
@@ -35,12 +46,11 @@ function sourceScope() {
 function chooseSources(ids) {
   const next = new Set(ids);
   if (JSON.stringify([...next].sort()) !== scopeKey()) {
-    selectedSourceIds = next; scopeVersion += 1;
+    selectedSourceIds = next; scopeVersion += 1; beginStudyAction();
     try { localStorage.setItem("learntrace.activeSources", JSON.stringify([...next])); } catch {}
     clearAssessment();
     document.querySelector("#answer")?.classList.add("hidden");
     renderConceptMap([]);
-    assessmentLoading = false; assessmentRequest += 1;
     const mapStatus = document.querySelector("#concept-map-status");
     if (mapStatus) mapStatus.textContent = "Selection changed. Rebuild connections using the selected material.";
   }
@@ -126,15 +136,19 @@ async function ensureServerReady() {
   return status;
 }
 function showLiveAnswer(result) {
-  document.querySelector("#answer-mode-label").textContent = result.mode === "model_grounded" ? "MODEL-GROUNDED ANSWER" : "EVIDENCE-ONLY ANSWER";
-  document.querySelector("#answer-title").textContent = result.mode === "insufficient_evidence" ? "No supported answer found" : "Answer from your source material";
+  document.querySelector("#answer-mode-label").textContent = result.mode === "model_grounded" ? "AI ANSWER · REVIEW THE SUPPORT" : "RETRIEVED MATERIAL · NOT A VERIFIED ANSWER";
+  document.querySelector("#answer-title").textContent = result.mode === "insufficient_evidence" ? "No supported answer established" : result.mode === "model_grounded" ? "Explanation from retrieved material" : "Related passages—not an established answer";
   document.querySelector("#answer-text").textContent = result.answer;
   document.querySelector("#answer .grounded").textContent = `${result.mode.replaceAll("_", " ")} · ${result.evidence.length} retrieved chunks`;
   const citations = document.querySelector("#citations"); citations.innerHTML = "";
   result.evidence.forEach(item => { const citation = document.createElement("button"); citation.type = "button"; citation.className = "citation"; citation.addEventListener("click", () => { const block = document.querySelector(`#evidence-${result.evidence.indexOf(item)}`); block?.scrollIntoView({ behavior: "smooth", block: "center" }); block?.focus(); }); citation.textContent = `▤ ${item.sourceTitle} · ${item.locationLabel}`; citation.title = item.text; citations.append(citation); });
   const panel = document.querySelector("#evidence-panel"); const excerpts = document.querySelector("#evidence-excerpts"); excerpts.innerHTML = "";
-  if (result.evidence.length) { result.evidence.forEach((item, index) => { const block = document.createElement("article"); block.className = "evidence-excerpt"; block.id = `evidence-${index}`; block.tabIndex = -1; const heading = document.createElement("strong"); heading.textContent = `${index + 1}. ${item.sourceTitle} · ${item.locationLabel}`; const meta = document.createElement("small"); meta.textContent = `Matching terms: ${item.matchedTerms.join(", ")}`; const body = document.createElement("p"); body.textContent = item.text; block.append(heading, meta, body); excerpts.append(block); }); panel.classList.remove("hidden"); } else { panel.classList.add("hidden"); }
-  document.querySelector("#answer-boundary").textContent = result.mode === "model_grounded" ? "The model was instructed to use only the retrieved excerpts shown above." : result.mode === "insufficient_evidence" ? "LearnTrace found no supporting chunk in the material you added, so it did not generate an answer." : "This is a matching excerpt, not a generated explanation. A word match alone does not prove it answers your question.";
+  if (result.evidence.length) { result.evidence.forEach((item, index) => { const block = document.createElement("article"); block.className = "evidence-excerpt"; block.id = `evidence-${index}`; block.tabIndex = -1; const heading = document.createElement("strong"); heading.textContent = `${index + 1}. ${item.sourceTitle} · ${item.locationLabel}`; const meta = document.createElement("small"); meta.textContent = `Matching terms: ${item.matchedTerms.join(", ")}`; const body = document.createElement("p"); body.textContent = item.text; block.append(heading, meta, body);
+    const quotes = (result.support || []).filter(support => support.excerpt === index + 1);
+    quotes.forEach(support => { const quote = document.createElement("p"); quote.textContent = `AI-selected support (verify relevance): “${support.quote}”`; block.append(quote); });
+    if (result.answerId && item.id) { const practice = document.createElement("button"); practice.type = "button"; practice.textContent = "Practise this passage"; practice.addEventListener("click", async () => { if (await loadSourceCheck(item.text.slice(0, 100), { practiceMode: "source_reading", chunkId: item.id })) document.querySelector("#check")?.scrollIntoView({ behavior: "smooth", block: "center" }); }); block.append(practice); }
+    excerpts.append(block); }); panel.classList.remove("hidden"); } else { panel.classList.add("hidden"); }
+  document.querySelector("#answer-boundary").textContent = result.mode === "model_grounded" ? "The AI assessed these excerpts as sufficient and supplied quotes found in them. Quote matching does not independently prove that every claim is supported. Review the evidence." : "Retrieved matches are candidates, not proof of an answer. No automatic check is created for an unassessed or unsupported question. Passage practice is a separate reading exercise.";
   const warning = document.querySelector("#model-warning"); warning.textContent = result.modelWarning || ""; warning.classList.toggle("hidden", !result.modelWarning);
   document.querySelector("#answer").classList.remove("hidden"); document.querySelector("#answer").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
@@ -192,7 +206,7 @@ function renderConceptMap(concepts) {
     });
     const actions = document.createElement("div"); actions.className = "concept-actions";
     const ask = document.createElement("button"); ask.type = "button"; ask.textContent = "Ask tutor"; ask.addEventListener("click", () => { document.querySelector("#question").value = `Explain ${concept.label} using my sources.`; document.querySelector("#question-form").requestSubmit(); });
-    const check = document.createElement("button"); check.type = "button"; check.textContent = "Start source check"; check.addEventListener("click", async () => { await loadSourceCheck(concept.label); document.querySelector("#check").scrollIntoView({ behavior: "smooth", block: "center" }); });
+    const check = document.createElement("button"); check.type = "button"; check.textContent = "Start source check"; check.addEventListener("click", async () => { if (await loadSourceCheck(concept.label, concept.evidence[0]?.id ? { practiceMode: "source_reading", chunkId: concept.evidence[0].id } : {})) document.querySelector("#check").scrollIntoView({ behavior: "smooth", block: "center" }); });
     actions.append(ask, check); node.append(actions);
     list.append(node);
   });
@@ -241,14 +255,17 @@ function renderOptions(values = []) {
   values.forEach((value, index) => { const button = document.createElement("button"); button.className = "option"; button.dataset.index = String(index); button.textContent = `${String.fromCharCode(65 + index)}. ${value}`; list.append(button); });
   document.querySelectorAll(".option").forEach(button => button.addEventListener("click", () => { document.querySelectorAll(".option").forEach(b => b.classList.remove("selected")); button.classList.add("selected"); selected = Number(button.dataset.index); }));
 }
-async function loadSourceCheck(focus) {
+async function loadSourceCheck(focus, origin = {}, parentAction) {
+  const action = parentAction === undefined ? beginStudyAction() : parentAction;
+  if (action !== studyAction) return;
   if (assessmentLoading) return;
   assessmentLoading = true; const version = scopeVersion; const request = ++assessmentRequest; clearAssessment("Preparing a question from your source…");
   try {
-    const assessment = await api("/api/assessment", { focus, ...sourceScope() });
-    if (version !== scopeVersion) return;
+    const assessment = await api("/api/assessment", { focus, ...origin, ...sourceScope() });
+    if (!isCurrentStudyAction(action, version) || request !== assessmentRequest) return;
     showAssessment(assessment, "Practice");
-  } catch (error) { if (version === scopeVersion) clearAssessment(error.message); }
+    return true;
+  } catch (error) { if (isCurrentStudyAction(action, version) && request === assessmentRequest) { clearAssessment(error.message); return true; } }
   finally { if (request === assessmentRequest) assessmentLoading = false; }
 }
 function showAssessment(assessment, label) {
@@ -261,17 +278,19 @@ function showAssessment(assessment, label) {
 }
 async function loadFollowUpCheck() {
   if (!activeStudyPath) return document.querySelector("#check").scrollIntoView({ behavior: "smooth" });
-  const version = scopeVersion;
-  const button = document.querySelector("#start-check"); button.disabled = true; button.textContent = "Building follow-up check…";
+  const button = document.querySelector("#start-check"); if (button.disabled) return;
+  const parentId = activeStudyPath.assessmentId;
+  const action = beginStudyAction(); const version = scopeVersion;
+  button.disabled = true; button.textContent = "Building follow-up check…";
   try {
-    const response = await fetch("/api/study-path/follow-up", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: activeStudyPath.assessmentId, ...sourceScope() }) });
+    const response = await fetch("/api/study-path/follow-up", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: parentId, ...sourceScope() }) });
     const assessment = await response.json(); if (!response.ok) throw new Error(assessment.error);
-    if (version !== scopeVersion) return;
+    if (!isCurrentStudyAction(action, version)) return;
     showAssessment(assessment, "Follow-up"); activeStudyPath = null;
     document.querySelector("#next-title").textContent = "Follow-up check ready"; document.querySelector("#next-copy").textContent = "This check uses another supported statement or a newly generated question. Inspect its cited passage after answering.";
     document.querySelector("#next-evidence").classList.add("hidden"); button.disabled = false; button.innerHTML = "Go to follow-up check <span>→</span>";
     document.querySelector("#check").scrollIntoView({ behavior: "smooth", block: "center" });
-  } catch (error) { button.disabled = false; button.innerHTML = "Try follow-up again <span>→</span>"; document.querySelector("#next-copy").textContent = error.message; }
+  } catch (error) { if (isCurrentStudyAction(action, version)) { button.disabled = false; button.innerHTML = "Try follow-up again <span>→</span>"; document.querySelector("#next-copy").textContent = error.message; } }
 }
 function updatePlaylistSelection() {
   const count = selectedPlaylistVideos.size; document.querySelector("#playlist-selection").textContent = `${count} lecture${count === 1 ? "" : "s"} selected`;
@@ -354,19 +373,23 @@ async function api(route, body, { timeoutMs } = {}) {
 document.querySelector("#question-form")?.addEventListener("submit", async event => {
   event.preventDefault();
   const question = document.querySelector("#question").value.trim(); if (!question) return;
-  const version = scopeVersion;
   const button = event.currentTarget.querySelector("button"); if (button.disabled) return;
+  const action = beginStudyAction(); const version = scopeVersion;
   const status = document.querySelector("#question-status");
   button.disabled = true; button.textContent = "Finding evidence…"; status.textContent = "";
   clearAssessment();
+  document.querySelector("#answer")?.classList.add("hidden");
   try {
     await ensureServerReady();
+    if (!isCurrentStudyAction(action, version)) return;
     const result = await api("/api/ask", { question, ...sourceScope() });
-    if (version !== scopeVersion) return;
+    if (!isCurrentStudyAction(action, version)) return;
     showLiveAnswer(result);
-    if (result.evidence.length && result.mode !== "insufficient_evidence") await loadSourceCheck(question);
-  } catch (error) { status.textContent = error.message; }
-  finally { button.disabled = false; button.textContent = "Find evidence ↗"; }
+    button.disabled = false; button.textContent = "Find evidence ↗";
+    if (result.practiceEligible === true) await loadSourceCheck(question, { answerId: result.answerId }, action);
+    else clearAssessment("No automatic quiz: support for this question was not established. Inspect an excerpt and choose ‘Practise this passage’, or start from a concept card.");
+  } catch (error) { if (isCurrentStudyAction(action, version)) status.textContent = error.message; }
+  finally { if (isCurrentStudyAction(action, version)) { button.disabled = false; button.textContent = "Find evidence ↗"; } }
 });
 document.querySelectorAll(".suggestions button").forEach(button => button.addEventListener("click", () => {
   document.querySelector("#question").value = button.dataset.question;
@@ -432,10 +455,10 @@ document.querySelector("#check-answer")?.addEventListener("click", async () => {
   const feedback = document.querySelector("#feedback");
   if (!activeAssessment || selected === null) { feedback.textContent = "Choose an answer to the current source check."; feedback.classList.remove("hidden"); return; }
   const button = document.querySelector("#check-answer"); if (button.disabled) return;
-  const assessment = activeAssessment; const selection = selected; button.disabled = true;
+  const assessment = activeAssessment; const selection = selected; const action = studyAction; button.disabled = true;
   try {
     const result = await api("/api/assessment/grade", { id: assessment.id, selectedIndex: selection, ...(assessment.sourceIds ? { sourceIds: assessment.sourceIds } : {}) });
-    if (activeAssessment?.id !== assessment.id) return;
+    if (action !== studyAction || activeAssessment?.id !== assessment.id) return;
     document.querySelectorAll(".option").forEach((option, index) => { option.disabled = true; if (index === result.correctIndex) option.classList.add("correct"); if (index === selection && !result.correct) option.classList.add("incorrect"); });
     if (!gradedIds.has(assessment.id)) {
       const currentScope = supportsSourceScope ? JSON.stringify(assessment.sourceIds) : "legacy";
@@ -451,7 +474,7 @@ document.querySelector("#check-answer")?.addEventListener("click", async () => {
     const evidence = document.querySelector("#next-evidence"); evidence.textContent = `${result.evidence.sourceTitle} · ${result.evidence.locationLabel} — “${result.evidence.text}”`; evidence.classList.remove("hidden");
     document.querySelector("#start-check").textContent = "Try a follow-up →"; document.querySelector("#start-check").disabled = false;
     button.textContent = "Result saved"; renderMastery();
-  } catch (error) { feedback.textContent = error.message; feedback.classList.remove("hidden"); button.disabled = false; }
+  } catch (error) { if (action === studyAction && activeAssessment?.id === assessment.id) { feedback.textContent = error.message; feedback.classList.remove("hidden"); button.disabled = false; } }
 });
 document.querySelector("#reset-progress")?.addEventListener("click", () => {
   mastery = {}; saveMastery(); renderMastery();

@@ -4,7 +4,7 @@ const corpus = chunkText("Deadlock occurs when processes wait forever for resour
 assert.equal(corpus.length, 2, "The source should create two traceable chunks.");
 const evidence = retrieve("How does a resource allocation graph identify deadlock?", corpus);
 assert.equal(evidence[0].locationLabel, "Transcript segment 2", "Retrieval should surface the graph evidence.");
-assert.match(extractiveAnswer("What is a graph?", evidence).answer, /resource-allocation graph/i);
+assert.equal(extractiveAnswer("What is a graph?", evidence).mode, "related_evidence", "Word matches alone must not become an established answer.");
 assert.equal(playlistIdFromUrl("https://www.youtube.com/playlist?list=PL123"), "PL123");
 const playlistPreview = mapPlaylistItems([{ snippet: { position: 0, title: "Deadlocks: Graph Cycles", description: "Resource allocation graphs and detection" }, contentDetails: { videoId: "abc123" } }, { snippet: { position: 1, title: "Private video", description: "" }, contentDetails: {} }]);
 assert.equal(playlistPreview[0].topics.includes("deadlocks"), true, "Playlist topics should be derived from public title/description metadata.");
@@ -48,9 +48,7 @@ assert.match(assessment.evidence.locationLabel, /Transcript segment 2/, "The sou
 const assessmentResult = gradeAssessment(assessment.id, assessment.options.findIndex(option => /resource-allocation graph uses/i.test(option)));
 assert.equal(assessmentResult.correct, true, "The assessment should grade the directly supported statement as correct.");
 assert.match(assessmentResult.studyPath.revisionAction, /fresh source check/i, "Grading should return a concrete revision action.");
-const followUp = createFollowUpAssessment(assessment.id);
-assert.notEqual(followUp.id, assessment.id, "A follow-up must be a fresh assessment attempt.");
-assert.equal(followUp.evidence.locationLabel, assessment.evidence.locationLabel, "A follow-up must stay linked to the original evidence.");
+assert.throws(() => createFollowUpAssessment(assessment.id), /No new source check/, "When the strongest focused statement is exhausted, do not drift to a weaker statement just to fill another check.");
 assert.equal(createAssessment("quantum entanglement", corpus), null, "Unsupported topics must not create an assessment.");
 (async () => {
   const pdf = require("./pdf-fixture").samplePdf();

@@ -16,6 +16,8 @@ Done when: a learner can choose an active course/source set and retrieval, check
 
 ### LT-02 — Word overlap is mistaken for answerability (reproduced; high)
 
+**Guardrails implemented 15 October; semantic accuracy still unverified:** lexical matches are now explicitly related material, with no automatic quiz. The existing tutor response may answer or report insufficient evidence; positive responses need citations and quotes present in the supplied passages. Validation/service failures safely fall back. A server-owned receipt gates automatic practice. Explicit passage reading remains available. This is not a separate LLM judge, and exact-quote checks cannot prove semantic support. Offline/browser paths and stubbed tutor contracts pass; a real-course human-labelled evaluation remains LT-27/28. Do not mark the broad answerability problem completely solved.
+
 retrieve keeps any score above zero. Asking “What year was deadlock invented?” against a passage defining deadlock returned a hit despite no date being present. That hit can trigger a model answer and a check. The excerpt fallback is labelled, but its heading still says “Answer from your source material.” Evidence: server.js retrieve, extractiveAnswer, /api/ask.
 
 Done when: distinguish candidate retrieval from sufficient evidence, abstain on unsupported questions even with overlapping words, and avoid generating a check from an unanswered question.
@@ -30,17 +32,23 @@ The tutor also receives each question independently; there is no conversation hi
 
 ### LT-04 — A valid citation number does not establish grounding (reproduced; high)
 
+Update: structured answers now require present-in-source support quotations as well as valid citations, displayed for inspection. A fabricated answer with unrelated but real quotes could still pass. Claim entailment is not independently verified; this finding remains open.
+
 The controlled model response “The moon is made of cheese [1].” was accepted against operating-systems evidence. modelAnswer verifies only reference-number bounds; missing references merely warn. /api/ask also reports the resulting mode as model_grounded. Evidence: server.js modelAnswer and /api/ask.
 
 Done when: answers expose claim-to-excerpt support, unsupported claims are rejected/revised or clearly withheld, and human-labelled examples test groundedness. This does not require embedding an LLM judge in the product.
 
 ### LT-05 — Generated questions are not verified for correctness (reproduced; high)
 
+**Additional guardrails, not fully resolved:** generated items require a substantial quote present in the source, lexical relevance to focus and normalized distinct options. Invalid items fall back to reading checks. Feedback labels the AI-generated key and exposes its quote; generic misconception notes are not diagnoses of a specific wrong choice. A false but topically related item with a real quote could still pass. Correctness/ambiguity need human-reviewed evaluation, not an internal LLM judge.
+
 A deliberately unrelated astronomy quiz with a false answer was accepted against deadlock notes because its shape was valid. Validation catches duplicate options and bad types, not correct-answer support, ambiguous alternatives, or a wrong explanation. Evidence: server.js validQuizItem/modelQuizItem.
 
 Done when: every accepted quiz has an inspectable support passage, one defensible answer and reviewed distractors. Test deliberately ambiguous and unsupported items, using format checks plus evidence-based review.
 
 ### LT-06 — The check can test the wrong part of a passage (confirmed; high)
+
+**Lexical focus repair implemented:** original learner focus is sent to the quiz generator and retained for follow-ups. Fallback sentences are ranked by focus and restricted to strongest matched-term coverage instead of always taking the first sentence or drifting to weaker material after exhaustion. Regression fixtures cover a definition followed by the requested graph-cycle explanation. Paraphrases and semantic equivalence remain limited by BM25; arbitrary topic alignment is not guaranteed.
 
 createAssessmentAI sends the selected passage without the learner's focus for the initial model question. The template selects its first unused sentence. A passage may mention both definition and graph detection, but the learner's graph question can receive a definition quiz. Evidence: server.js createAssessmentAI and assessmentFromSource.
 
@@ -149,6 +157,8 @@ localStorage groups by concept strings generated from questions/models, shared a
 Done when: stable concept/workspace IDs drive storage, and every recorded result retains its source and attempt identity.
 
 ### LT-23 — Overlapping interactions can show stale results (code-supported risk; medium)
+
+**15 October, step 1 repaired for the learner answer/check flow:** a new study-action ID now invalidates older question, quiz, follow-up and grading UI callbacks within the same source scope as well as across scope changes. Automatic checks inherit the question action. Old success/error/finally paths cannot replace the new quiz or change its controls, and obsolete practice responses cannot trigger scrolling. Added delayed-response regressions that fail on the old frontend and assert actual rendered quizzes with a repaired fake-DOM harness. Seven suites and isolated normal-browser practice/grading/follow-up smoke pass. This does not add request cancellation or solve all asynchronous ingestion/status interactions; those remain separate checks.
 
 A pending model check can return after the learner starts another action. assessmentLoading silently drops another check request instead of linking work to a current question. Starting a new query clears a check but leaves the previous answer visible while loading or on request failure. There are no request IDs/cancellation to reject outdated responses.
 

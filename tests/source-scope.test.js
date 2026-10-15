@@ -12,7 +12,7 @@ const { server } = require('../server');
   }
   try {
     assert.equal((await request('/api/status')).sourceScopingReady, true);
-    const a = await request('/api/ingest', { title: 'Week 1', sourceType: 'textbook', content: 'Deadlock occurs when processes wait for resources. A resource-allocation graph with a single instance of each resource uses a cycle to identify deadlock.' }, 201);
+    const a = await request('/api/ingest', { title: 'Week 1', sourceType: 'textbook', content: 'Deadlock occurs when processes wait for resources. A resource-allocation graph with a single instance of each resource uses a cycle to identify deadlock. A resource graph can reveal deadlock while processes wait.' }, 201);
     const b = await request('/api/ingest', { title: 'Week 1', sourceType: 'textbook', content: 'In economics, resource allocation affects wages and employment. Market supply and demand influence economic outcomes.' }, 201);
     const c = await request('/api/ingest', { title: 'Demo custom upload', sourceType: 'transcript', content: 'WEBVTT\n\n00:00:01.000 --> 00:00:06.000\nA deadlock can occur when processes wait for resources.' }, 201);
     const idsA = a.addedSourceIds, idsB = b.addedSourceIds;
@@ -32,7 +32,7 @@ const { server } = require('../server');
     const deadlock = map.concepts.find(item => item.matchedTerm === 'deadlock');
     assert(deadlock && deadlock.sourceCount === 2);
     assert(deadlock.evidence.every(item => [...idsA, ...c.addedSourceIds].includes(item.sourceId)));
-    const check = await request('/api/assessment', { focus: 'deadlock resource graph', sourceIds: idsA }, 201);
+    const check = await request('/api/assessment', { focus: 'deadlock resource graph', practiceMode: 'source_reading', chunkId: answer.evidence[0].id, sourceIds: idsA }, 201);
     assert.deepEqual(check.sourceIds, idsA);
     assert(!check.evidence.text.includes('wages'));
     await request('/api/assessment/grade', { id: check.id, selectedIndex: 0, sourceIds: idsB }, 409);

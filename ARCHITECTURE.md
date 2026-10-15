@@ -40,6 +40,10 @@ Each passage has a unique ID, source title/type, location label and text. Pages,
 
 Retrieval uses BM25 to rank word matches, accounting for term frequency, rarity and passage length. It does not understand synonyms. A nonzero score proves word overlap, not answerability.
 
+The answer route separates related candidates from a tutor answer. Without AI it returns related passages with no automatic quiz. The existing tutor request uses a structured answer/insufficient outcome with supporting quotes. Code validates quote occurrence and citation bounds, but does not independently verify semantic entailment. Failure/refusal falls back to related passages. This is not a judge or a second model verification call.
+
+Automatic assessments require a bounded, server-owned answer receipt bound to the exact question, cited chunk IDs and selected sources. Explicit source-reading assessments instead require a chunk ID in the selected corpus; concept cards and excerpt actions supply it. No client-supplied eligibility flag can authorize an automatic quiz. Receipts and assessments remain in memory and expire on restart/eviction.
+
 Generation optionally sends the question and passages to the Responses API. The prompt restricts the answer to excerpts and asks for numbered citations. Invalid numbers cause fallback; absent citations cause a warning. Neither behavior proves semantic truth. Without a key, the app displays a matching excerpt with its limitation stated.
 
 ## Assessment and adaptation
